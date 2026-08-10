@@ -81,8 +81,8 @@ static int query_card(sqlite3 *db, int card_id, char *cname, int n, int *chara_i
 
 static void print_card_res_menu(void){
     printf("可选资源（空格/逗号分隔数字，a=全部，0=开始下载）：\n");
-    printf("1.卡面(6尺寸)\t2.背景(普通/竖版/小横版)\t3.卡面Spina动画\n");
-    printf("4.3D照片(L/S)\t5.语音\t6.Spine小人\t7.3D模型\t8.台词文本\n");
+    printf("1.卡面(6尺寸)\t2.背景(普通/竖版/小横版)\t3.卡面Spina动画(beta)\n");
+    printf("4.3D照片(L/S)\t5.语音\t6.Spine小人(beta)\t7.3D模型\t8.台词文本\n");
 }
 
 /* 按卡片构建并下载选中的资源（卡面/背景/卡面Spina动画/3d照片/语音/spine/3d模型/台词） */

@@ -6751,7 +6751,9 @@ var spine;
 							var x0 = vertices[t1], y0 = vertices[t1 + 1], u0 = vertices[t1 + 6], v0 = vertices[t1 + 7];
 							var x1 = vertices[t2], y1 = vertices[t2 + 1], u1 = vertices[t2 + 6], v1 = vertices[t2 + 7];
 							var x2 = vertices[t3], y2 = vertices[t3 + 1], u2 = vertices[t3 + 6], v2 = vertices[t3 + 7];
-							this.drawTriangle(texture, x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2);
+							// 顶点膨胀只在完全不透明(alpha=1)且纹理完全不透明时才有用；
+							// 贴图 alpha 半透明(如影子)膨胀会叠出亮边，因此默认关闭，统一靠超采样消除接缝。
+							this.drawTriangle(texture, x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2, false);
 							if (this.debugRendering) {
 								ctx.strokeStyle = "green";
 								ctx.beginPath();
@@ -6780,6 +6782,7 @@ var spine;
 				ctx.lineTo(x1, y1);
 				ctx.lineTo(x2, y2);
 				ctx.closePath();
+				// 把三角形绕重心稍微放大，让相邻三角形重叠，消除边缘抗锯齿产生的接缝线
 				x1 -= x0;
 				y1 -= y0;
 				x2 -= x0;

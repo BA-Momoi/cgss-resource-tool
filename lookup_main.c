@@ -37,7 +37,7 @@ int lookup_main(void){
     char buf[128];
     while (1) {
         printf("\f");
-        printf("1.3D模型\t2.2DSpine小人\t3.歌曲\n");
+        printf("1.3D模型\t2.2DSpine小人(beta)\t3.歌曲\n");
         printf("4.歌曲动作\t5.谱面\t6.3D舞台\n");
         printf("7.卡面\t8.角色语言（文本/音频）\n");
         printf("0.返回上一级\n");

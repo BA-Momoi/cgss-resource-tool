@@ -11,7 +11,7 @@ int main(void){
     SetConsoleOutputCP(CP_UTF8);   // 强制 UTF-8 控制台，输入输出统一
     char buf[32];
     while (1) {
-        printf("1.数据表查找数据\n2.数据下载并解析\n3.解包\n4.打开Spine预览\n");
+        printf("1.数据表查找数据\n2.数据下载并解析\n3.解包\n4.打开Spine预览(beta)\n");
         if (fgets(buf, sizeof buf, stdin) == NULL) break;   // EOF 退出
         int opt = atoi(buf);
         switch (opt) {

@@ -29,7 +29,7 @@
   <button id="btn_pause">暂停</button>
   <label>速度</label><input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
   <label>显示全部层</label><input type="checkbox" id="chk_all" checked>
-  <button id="btn_export" title="按背景(bg)范围导出 MP4（最高码率）">导出MP4</button>
+  <button id="btn_export" title="按背景(bg)范围导出 MP4（最高码率）">导出MP4(beta)</button>
   <span id="export_status"></span>
   <span id="fps"></span>
 </div>
@@ -38,6 +38,7 @@
 
 <script src="spine-core.js"></script>
 <script src="spine-canvas.js"></script>
+<script src="spine-webgl.js"></script>
 <script src="cgss_skel_parser.js"></script>
 <script src="mp4-muxer.min.js"></script>
 <script>
@@ -47,6 +48,11 @@ var pngMap = {};         // basename -> Image
 var compositeMap = {};   // basename -> 已合成 RGBA 的 canvas
 var renderer = null, last = 0, playing = true;
 var fit = { scale: 1, tx: 0, ty: 0 };
+var SS = 2;              // 超采样倍数：整帧画到 2 倍离屏画布再缩小，消除三角形接缝
+try { var _m = /[?&]ss=(\d+)/.exec(location.search); if (_m) SS = parseInt(_m[1], 10) || 2; } catch(e){}
+var offCanvas = null, offRenderer = null;
+var glCanvas = null, glRenderer = null;
+var expGL = null, expGLCanvas = null;
 
 function msg(s){ document.getElementById('msg').textContent = s; }
 
@@ -148,6 +154,19 @@ function tryInit(){
     canvas.height = 1400;
     ctx.setTransform(1,0,0,1,0,0);
     ctx.clearRect(0,0,canvas.width,canvas.height);
+    offCanvas = document.createElement('canvas');
+    offCanvas.width = canvas.width * SS;
+    offCanvas.height = canvas.height * SS;
+    offRenderer = new spine.canvas.SkeletonRenderer(offCanvas.getContext('2d'));
+    offRenderer.triangleRendering = true;
+    // 优先 WebGL（无三角形接缝）；失败则回退 canvas 2D + 超采样
+    glCanvas = null; glRenderer = null;
+    try {
+      glCanvas = document.createElement('canvas');
+      glCanvas.width = canvas.width;
+      glCanvas.height = canvas.height;
+      glRenderer = new CGSSWebGLRenderer(glCanvas, { preserveDrawingBuffer: true });
+    } catch (e2) { glRenderer = null; glCanvas = null; }
 
     skelList.forEach(function(s){
       var data = j.readSkeletonData(s.text);
@@ -179,26 +198,38 @@ function tryInit(){
       if (s.data.animations.length) s.state.setAnimation(0, s.data.animations[0].name, true);
     });
 
-    // 计算所选动画全程的包围盒并集，自动缩放居中
-    // （小人走路动画会离开初始位置，用全程包围盒适配才不会被甩出画面）
+    // 有背景(卡面动画)：用各层静态 setup 包围盒适配，背景铺满画面（特效动画范围大，不能按它缩放）
+    // 没有背景(小人)：用动画全程包围盒适配，走路不会甩出画面
+    var hasBg = false;
+    skelList.forEach(function(s){ if (/bg/i.test(s.name)) hasBg = true; });
     var offset = new spine.Vector2(), size = new spine.Vector2(), temp = [];
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     skelList.forEach(function(s){
       var anim = s.data.animations.length ? s.data.animations[0] : null;
-      var dur = anim ? anim.duration : 1;
-      var steps = Math.max(2, Math.round(dur * 30));
-      for (var k = 0; k <= steps; k++){
-        var t = dur * k / steps;
-        if (anim){ s.state.setAnimation(0, anim.name, false); s.state.update(t); }
-        s.state.apply(s.skeleton);
+      if (hasBg){
+        s.skeleton.setToSetupPose();
         s.skeleton.updateWorldTransform();
         s.skeleton.getBounds(offset, size, temp);
         if (isFinite(offset.x) && size.x > 0) {
           minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
           maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
         }
+      } else {
+        var dur = anim ? anim.duration : 1;
+        var steps = Math.max(2, Math.round(dur * 30));
+        for (var k = 0; k <= steps; k++){
+          var t = dur * k / steps;
+          if (anim){ s.state.setAnimation(0, anim.name, false); s.state.update(t); }
+          s.state.apply(s.skeleton);
+          s.skeleton.updateWorldTransform();
+          s.skeleton.getBounds(offset, size, temp);
+          if (isFinite(offset.x) && size.x > 0) {
+            minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
+            maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
+          }
+        }
+        if (anim) s.state.setAnimation(0, anim.name, true);
       }
-      if (anim) s.state.setAnimation(0, anim.name, true);
     });
     if (isFinite(minX) && maxX > minX) {
       var bw = maxX - minX, bh = maxY - minY;
@@ -224,16 +255,39 @@ function loop(t){
   var sp = parseFloat(document.getElementById('speed').value) || 1;
   var canvas = document.getElementById('cv');
   var ctx = canvas.getContext('2d');
-  ctx.setTransform(1,0,0,1,0,0);
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  ctx.setTransform(fit.scale,0,0,fit.scale,fit.tx,fit.ty);
+  if (glRenderer) {
+    glRenderer.setTransform(fit.scale, fit.tx, fit.ty);
+    glRenderer.clear(0.2, 0.2, 0.2, 1);
+    skelList.forEach(function(s){
+      if (s.check && !s.check.checked) return;
+      s.state.update(dt * sp);
+      s.state.apply(s.skeleton);
+      s.skeleton.updateWorldTransform();
+      glRenderer.draw(s.skeleton);
+    });
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.drawImage(glCanvas, 0, 0, glCanvas.width, glCanvas.height, 0, 0, canvas.width, canvas.height);
+    document.getElementById('fps').textContent = ' ' + Math.round(1000 / Math.max(1, dt * 1000 / sp)) + ' fps (WebGL)';
+    return;
+  }
+  var octx = offCanvas ? offCanvas.getContext('2d') : null;
+  var renderCtx = octx || ctx;
+  var r = octx ? offRenderer : renderer;
+  renderCtx.setTransform(1,0,0,1,0,0);
+  renderCtx.clearRect(0,0,offCanvas ? offCanvas.width : canvas.width, offCanvas ? offCanvas.height : canvas.height);
+  renderCtx.setTransform(fit.scale * (octx ? SS : 1),0,0,fit.scale * (octx ? SS : 1),fit.tx * (octx ? SS : 1),fit.ty * (octx ? SS : 1));
   skelList.forEach(function(s){
     if (s.check && !s.check.checked) return;
     s.state.update(dt * sp);
     s.state.apply(s.skeleton);
     s.skeleton.updateWorldTransform();
-    renderer.draw(s.skeleton);
+    r.draw(s.skeleton);
   });
+  if (octx) {
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(offCanvas, 0, 0, offCanvas.width, offCanvas.height, 0, 0, canvas.width, canvas.height);
+  }
   document.getElementById('fps').textContent = ' ' + Math.round(1000 / Math.max(1, dt * 1000 / sp)) + ' fps';
 }
 
@@ -265,25 +319,18 @@ function exportBounds(){
   var bg = null;
   skelList.forEach(function(s){ if (/bg/i.test(s.name)) bg = s; });
   var targets = bg ? [bg] : skelList;
+  // 画面范围 = 背景的静态大小（setup pose 包围盒）；没有背景（小人）就用角色自身大小
   var offset = new spine.Vector2(), size = new spine.Vector2(), temp = [];
   var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-  var steps = Math.max(2, Math.round(dur * fps));
-  for (var i = 0; i <= steps; i++){
-    var t = dur * i / steps;
-    targets.forEach(function(s){
-      var an = findAnim(s);
-      if (!an) return;
-      s.state.setAnimation(0, an.name, false);
-      s.state.update(t);
-      s.state.apply(s.skeleton);
-      s.skeleton.updateWorldTransform();
-      s.skeleton.getBounds(offset, size, temp);
-      if (isFinite(offset.x) && size.x > 0){
-        minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
-        maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
-      }
-    });
-  }
+  targets.forEach(function(s){
+    s.skeleton.setToSetupPose();
+    s.skeleton.updateWorldTransform();
+    s.skeleton.getBounds(offset, size, temp);
+    if (isFinite(offset.x) && size.x > 0){
+      minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
+      maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
+    }
+  });
   if (!isFinite(minX) || !(maxX > minX)){ minX = -600; minY = -600; maxX = 600; maxY = 600; }
   return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, duration: dur, fps: fps };
 }
@@ -304,11 +351,12 @@ function exportMP4(){
   if (!window.VideoEncoder || !window.VideoFrame){ msg('当前浏览器不支持 WebCodecs，无法导出 MP4（请用新版 Chrome/Edge）'); return; }
   if (typeof Mp4Muxer === 'undefined'){ msg('缺少 mp4-muxer.min.js'); return; }
   var b = exportBounds();
-  var w = Math.floor(b.maxX - b.minX), h = Math.floor(b.maxY - b.minY);
+  // H.264(yuv420) 要求宽高为偶数：先按背景尺寸四舍五入，再向上取偶（尽量贴近背景实际大小）
+  var w = Math.round(b.maxX - b.minX), h = Math.round(b.maxY - b.minY);
   var maxDim = 4096;
   var sc = Math.min(1, maxDim / Math.max(w, h));
   w = Math.max(2, Math.floor(w * sc)); h = Math.max(2, Math.floor(h * sc));
-  if (w % 2) w--; if (h % 2) h--;
+  if (w % 2) w++; if (h % 2) h++;
   var btn = document.getElementById('btn_export');
   var st = document.getElementById('export_status');
   btn.disabled = true;
@@ -317,7 +365,19 @@ function exportMP4(){
   var canvas = document.createElement('canvas');
   canvas.width = w; canvas.height = h;
   var ctx = canvas.getContext('2d');
-  var expRenderer = new spine.canvas.SkeletonRenderer(ctx);
+  // 优先 WebGL 导出（无接缝）；失败回退 canvas 2D 超采样
+  expGL = null; expGLCanvas = null;
+  try {
+    expGLCanvas = document.createElement('canvas');
+    expGLCanvas.width = w; expGLCanvas.height = h;
+    expGL = new CGSSWebGLRenderer(expGLCanvas, { preserveDrawingBuffer: true });
+  } catch (e3) { expGL = null; expGLCanvas = null; }
+  var EF = Math.min(2, maxDim / Math.max(w, h));   // 导出也做超采样（离屏不超过 4096）
+  var expOff = document.createElement('canvas');
+  expOff.width = Math.max(2, Math.round(w * EF));
+  expOff.height = Math.max(2, Math.round(h * EF));
+  var ectx = expOff.getContext('2d');
+  var expRenderer = new spine.canvas.SkeletonRenderer(ectx);
   expRenderer.triangleRendering = true;
 
   var muxer = new Mp4Muxer.Muxer({
@@ -353,10 +413,27 @@ function exportMP4(){
   var ty = -b.minY * s + (h - (b.maxY - b.minY) * s) / 2;
 
   function drawFrame(t){
-    ctx.setTransform(1,0,0,1,0,0);
-    ctx.fillStyle = '#333';
-    ctx.fillRect(0,0,w,h);
-    ctx.setTransform(s,0,0,s,tx,ty);
+    if (expGL) {
+      expGL.setTransform(s, tx, ty);
+      expGL.clear(0.2, 0.2, 0.2, 1);
+      skelList.forEach(function(sk){
+        if (sk.check && !sk.check.checked) return;
+        var an = findAnim(sk);
+        if (!an) return;
+        sk.state.setAnimation(0, an.name, false);
+        sk.state.update(t);
+        sk.state.apply(sk.skeleton);
+        sk.skeleton.updateWorldTransform();
+        expGL.draw(sk.skeleton);
+      });
+      ctx.setTransform(1,0,0,1,0,0);
+      ctx.drawImage(expGLCanvas, 0, 0, w, h);
+      return;
+    }
+    ectx.setTransform(1,0,0,1,0,0);
+    ectx.fillStyle = '#333';
+    ectx.fillRect(0,0,expOff.width,expOff.height);
+    ectx.setTransform(s*EF,0,0,s*EF,tx*EF,ty*EF);
     skelList.forEach(function(sk){
       if (sk.check && !sk.check.checked) return;
       var an = findAnim(sk);
@@ -367,6 +444,9 @@ function exportMP4(){
       sk.skeleton.updateWorldTransform();
       expRenderer.draw(sk.skeleton);
     });
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(expOff, 0, 0, expOff.width, expOff.height, 0, 0, w, h);
   }
 
   var total = Math.ceil(b.duration * b.fps);

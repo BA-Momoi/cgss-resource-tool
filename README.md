@@ -19,13 +19,14 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
      - 卡面Spina动画（live2d）解出的文件单独放在 角色目录\卡面Spina动画\spine\ 子文件夹
      - 自动把 .skel 转成两份 json：*.json（3.6，浏览器预览用）+ *_v38.json（3.8.75，编辑器用）
    - ACB 音乐提取和 HCA 解码（acb2wavs）
-4. **打开Spine预览**：扫描 CGSS_DOWN 里带 Spine(live2d) 资源的角色，
+4. **打开Spine预览(beta)**：扫描 CGSS_DOWN 里带 Spine(live2d) 资源的角色，
    缺 json 自动补转，然后用默认浏览器打开 spine_preview/preview.html
    （页面支持直接选 .skel 自动转 JSON，需同时选 atlas 和 tex.png + tex_A8.png，
    A8 是透明通道，合成后特效无黑边；画面已按 Spine 坐标自动翻转）
    - 图层顺序已自动排好：bg → eff2 → chara → eff1 → fg（页面按文件名排序）
-   - 混合模式已模拟：additive 槽位用 canvas lighter 叠加、multiply 用 multiply，
-     解决特效发黑/发暗的问题（bg 里 95 个 additive 槽 + eff1 全 additive 实测正常）
+   - 默认用 WebGL 渲染（无三角形接缝，大三角形/雾气等半透明效果不会再被 canvas 丢弃）；
+     WebGL 不可用时自动回退 canvas 2D + 2 倍超采样
+   - 混合模式已模拟：additive/multiply/screen 均按 Spine 规则混合（bg/eff 特效层实测正常）
    - **导出MP4**：页面有“导出MP4”按钮，用 WebCodecs 硬编码 H.264（Main 高码率），
      30fps、尺寸以背景(bg)包围盒为界（无 bg 时用全部图层包围盒，上限 4096），
      导出完成自动下载 .mp4（需新版 Chrome/Edge）
@@ -154,10 +155,10 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 ## 版本历史
 
 ### v1.1（2026-08-10）
-- 新增 **Spine 预览**（主菜单 4）：扫描已解包角色，浏览器直接看卡面 Spine 动画
+- 新增 **Spine 预览（beta）**（主菜单 4）：扫描已解包角色，浏览器直接看卡面 Spine 动画
   - 图层顺序自动排好（bg → eff2 → chara → eff1 → fg）
   - 模拟 additive / multiply 混合模式，特效不再发黑发暗
-- 新增 **Spine 2.1 共享小人骨架** 支持（spine 小人完整可用）：
+- 新增 **Spine 2.1 共享小人骨架（beta）** 支持：
   - 自动下载共享骨架 spine_sprachen_petit_chara_common.unity3d
   - 逆向 CGSS Spine 2.1 二进制格式，解包时自动转 JSON（3.6 + 3.8.75）
   - 坐标按 0.5 对齐 SPC 卡面图集，10 个内置动画可播可导入 3.8.75 编辑器
