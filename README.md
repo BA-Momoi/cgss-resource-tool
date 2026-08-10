@@ -3,7 +3,7 @@
 CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：查询、下载、解包一体的命令行程序
 纯 C 编写（MinGW + CMake），可独立运行
 下载及解包文件所属均为BANDAI NAMCO Entertainment Inc. 
-仅用作学习交流，请于下载或解包后24小时内删除
+仅用作学习交流，请于下载或解包后24小时内删除BANDAI NAMCO Entertainment Inc. 
 
 ## 功能
 
@@ -98,7 +98,7 @@ cmake --build build --config Debug --target all -j 16
 不在仓库内，需要自行准备：
 
 - 从 CGSS 客户端提取（配合 mishiro 客户端 / 抓包工具）
-- 或从 Release 附件获取（如果发布者提供了）
+- 或从 Release 附件获取（看情况发）
 
 编译后把 `CGSS_Script.exe` 和两个数据库放同一目录即可运行。
 
