@@ -56,6 +56,13 @@ var expGL = null, expGLCanvas = null;
 
 function msg(s){ document.getElementById('msg').textContent = s; }
 
+// 小人骨架（SPSprachen）用 flip 骨骼控制左右镜像：
+// 动画数据是向右走，但美术朝向是左视，镜像(scaleX=-1)后角色看向移动方向。
+function applyPetitFlip(s){
+  if (s.flipBone === undefined) s.flipBone = s.skeleton.findBone('flip') || null;
+  if (s.flipBone) s.flipBone.scaleX = -1;
+}
+
 document.getElementById('f_skel').addEventListener('change', function(e){
   skelList = [];
   var files = Array.prototype.slice.call(e.target.files);
@@ -64,7 +71,7 @@ document.getElementById('f_skel').addEventListener('change', function(e){
     f.arrayBuffer().then(function(ab){
       var head = new Uint8Array(ab, 0, 4);
       var first = String.fromCharCode(head[0]);
-      var looksJson = first === '{' || first === ' ' || first === '\t' || first === '\r' || first === '\n';
+      var looksJson = first === '{' || first === ' ' || first === '\t' || first === '\r' || first === '\n' || first === 'S' || first === 's';
       if (!looksJson) {
         // CGSS 二进制 skel（0x1C 头）或 .skel.asset：按二进制解析
         var obj = CGSSSkelParser.parse(ab);
@@ -72,6 +79,14 @@ document.getElementById('f_skel').addEventListener('change', function(e){
         if (--pending === 0) { finishSkelLoad(files.length); }
       } else {
         var text = new TextDecoder('utf-8').decode(ab);
+        try {
+          var obj = JSON.parse(text);
+          if (!obj || !obj.bones) throw new Error('not skeleton json');
+        } catch (e1) {
+          msg('文件 "' + f.name + '" 不是骨架文件（JSON 解析失败）。\n小人请把 骨架 选 SPSprachen_s.json，图集选 SPC{id}.atlas(.asset)，贴图选 SPC{id}.png');
+          if (--pending === 0) { finishSkelLoad(files.length); }
+          return;
+        }
         skelList.push({ name: f.name, text: text });
         if (--pending === 0) { finishSkelLoad(files.length); }
       }
@@ -143,7 +158,13 @@ function tryInit(){
     var loader = function(path){
       var key = path.split(/[\\\/]/).pop();
       if (compositeMap[key]) return new spine.canvas.CanvasTexture(compositeMap[key]);
-      var img = pngMap[key] || pngMap[Object.keys(pngMap)[0]];
+      var img = pngMap[key];
+      if (!img) {
+        // 图集引用的贴图没被选中：明确报错，而不是静默拿第一张贴图渲染成“随机扒块”
+        throw new Error('图集引用的贴图 "' + key + '" 不在已选贴图里，图集和贴图不配套。\n' +
+          '小人请选：骨架 SPSprachen_s.json + 图集 SPC{角色/卡id}.atlas(.asset) + 贴图 SPC{角色/卡id}.png\n' +
+          '卡面动画请选：5 个 SP3S{卡id}_*.skel + SP3S{卡id}_tex.atlas(.asset) + tex.png + tex_A8.png');
+      }
       return new spine.canvas.CanvasTexture(img);
     };
     var atlas = new spine.TextureAtlas(atlasText, loader);
@@ -262,6 +283,7 @@ function loop(t){
       if (s.check && !s.check.checked) return;
       s.state.update(dt * sp);
       s.state.apply(s.skeleton);
+      applyPetitFlip(s);
       s.skeleton.updateWorldTransform();
       glRenderer.draw(s.skeleton);
     });
@@ -280,6 +302,7 @@ function loop(t){
     if (s.check && !s.check.checked) return;
     s.state.update(dt * sp);
     s.state.apply(s.skeleton);
+    applyPetitFlip(s);
     s.skeleton.updateWorldTransform();
     r.draw(s.skeleton);
   });
@@ -423,6 +446,7 @@ function exportMP4(){
         sk.state.setAnimation(0, an.name, false);
         sk.state.update(t);
         sk.state.apply(sk.skeleton);
+        applyPetitFlip(sk);
         sk.skeleton.updateWorldTransform();
         expGL.draw(sk.skeleton);
       });
@@ -441,6 +465,7 @@ function exportMP4(){
       sk.state.setAnimation(0, an.name, false);
       sk.state.update(t);
       sk.state.apply(sk.skeleton);
+      applyPetitFlip(sk);
       sk.skeleton.updateWorldTransform();
       expRenderer.draw(sk.skeleton);
     });
