@@ -133,6 +133,8 @@ static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char
     if (selected(sel, nsel, 6)){
         snprintf(res, sizeof res, "card_spine_%d.unity3d", card_id);
         add_item(rdb, items, &n, res, L"spine");
+        /* 共享小人骨架（SPSprachen），与卡面小人一起下载，解包时自动转 JSON */
+        add_item(rdb, items, &n, "spine_sprachen_petit_chara_common.unity3d", L"spine");
     }
     if (selected(sel, nsel, 7)){
         if (dress_id > 0){

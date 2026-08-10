@@ -4,6 +4,7 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
 纯 C 编写（MinGW + CMake），可独立运行
 下载及解包文件所属均为BANDAI NAMCO Entertainment Inc. 
 仅用作学习交流，请于下载或解包后24小时内删除BANDAI NAMCO Entertainment Inc. 
+#### 解包和部分下载功能均为DS_V4编写(磕了)
 ##### 其实傻不傻瓜式我也不知道，我尽量做的简单了
 ## 功能
 ### 待完善
@@ -15,8 +16,26 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
 3. **解包**：
    - 模型解包为 FBX（调用 AssetStudio.CLI）
    - 角色资源解包（卡面 / 背景 / 卡面Spina动画 / 3d照片 / spine → png / 数据文件）
+     - 卡面Spina动画（live2d）解出的文件单独放在 角色目录\卡面Spina动画\spine\ 子文件夹
+     - 自动把 .skel 转成两份 json：*.json（3.6，浏览器预览用）+ *_v38.json（3.8.75，编辑器用）
    - ACB 音乐提取和 HCA 解码（acb2wavs）
+4. **打开Spine预览**：扫描 CGSS_DOWN 里带 Spine(live2d) 资源的角色，
+   缺 json 自动补转，然后用默认浏览器打开 spine_preview/preview.html
+   （页面支持直接选 .skel 自动转 JSON，需同时选 atlas 和 tex.png + tex_A8.png，
+   A8 是透明通道，合成后特效无黑边；画面已按 Spine 坐标自动翻转）
+   - 图层顺序已自动排好：bg → chara → eff1 → eff2 → fg（页面按文件名排序）
+   - 混合模式已模拟：additive 槽位用 canvas lighter 叠加、multiply 用 multiply，
+     解决特效发黑/发暗的问题（bg 里 95 个 additive 槽 + eff1 全 additive 实测正常）
 
+## Spine 编辑器（3.8.75）使用
+
+- 3.8.75 **不能直接打开** 3.6 版本的 .skel/.json（Spine 官方要求数据版本一致）
+- 本工具在解包/预览时会额外生成 `*_v38.json`（数据版本标为 3.8.75）
+  这批卡面动画数据没有 IK/Transform/Path 约束，3.6→3.8 只差版本号
+  （如果哪些卡带了我目前也没辙）
+  已在 Spine 3.8 运行时实测可正常加载播放。
+- 在 3.8.75 编辑器里：打开 `*_v38.json` + `*_v38.atlas` + `*_merged.png`
+  （merged 是 RGB 主贴图 + A8 透明通道合成后的单张贴图，编辑器不支持双贴图）
 ## 目录结构
 
 ```
@@ -39,6 +58,8 @@ CGSS/
 ├── unpack.c               解包菜单 + 公共解包工具
 ├── unpack_fbx.c           模型解包为 FBX
 ├── unpack_res.c           角色资源解包（卡面/背景/卡面Spina动画/3d照片/spine）
+├── spine_convert.c        Spine 3.6 二进制 .skel -> JSON 转换（CGSS 大端格式）
+├── preview.c              打开 Spine 浏览器预览（主菜单 4）
 ├── util.c                 公共工具（宽字符转换/目录/多选解析）
 ├── GBKswapUTF8.c          编码转换
 ├── sqlite3.c / sqlite3.h  SQLite 库
@@ -110,3 +131,41 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 - 数据库请按上文说明准备
 
 下载后解压，把数据库放进同一目录，双击 `CGSS_Script.exe` 即可使用。
+
+## Spine 小人（SPC，card_spine）说明
+
+- 程序里“Spine小人”下载的是 card_spine_{卡id}.unity3d（贴图+图集），
+  同时会自动下载**共享小人骨架** spine_sprachen_petit_chara_common.unity3d。
+- 共享骨架（SPSprachen_s.skel）是 **Spine 2.1 格式**（CGSS 头 + 大端浮点），
+  工具内置 2.1 → JSON 转换（spine_convert.c），解包时自动识别转换，
+  并把坐标按 0.5 缩放对齐 SPC 卡面图集（SPC 图集是半分辨率）。
+- 解包后 角色目录\spine\ 里就是完整可用的 Spine 工程：
+  - SPSprachen_s.json / SPSprachen_s_v38.json（3.6 / 3.8.75 骨架）
+  - SPC{卡id}.atlas（图集，自动从 .atlas.asset 复制一份）
+  - SPC{卡id}.png（自带 alpha 的贴图）
+- Spine 3.8.75 编辑器：打开 SPSprachen_s_v38.json + SPC{卡id}.atlas + SPC{卡id}.png，
+  内置 10 个动画（anime_0000_000 ~ anime_0001_004），主菜单 4 可浏览器预览。
+- 注意：共享骨架只含正面皮肤（front_to_left/front_to_right），
+  背面皮肤（back_*）是游戏客户端另一套机制，不在下载资源里。
+
+## 版本历史
+
+### v1.1（2026-08-10）
+- 新增 **Spine 预览**（主菜单 4）：扫描已解包角色，浏览器直接看卡面 Spine 动画
+  - 图层顺序自动排好（bg → chara → eff1 → eff2 → fg）
+  - 模拟 additive / multiply 混合模式，特效不再发黑发暗
+- 新增 **Spine 2.1 共享小人骨架** 支持（spine 小人完整可用）：
+  - 自动下载共享骨架 spine_sprachen_petit_chara_common.unity3d
+  - 逆向 CGSS Spine 2.1 二进制格式，解包时自动转 JSON（3.6 + 3.8.75）
+  - 坐标按 0.5 对齐 SPC 卡面图集，10 个内置动画可播可导入 3.8.75 编辑器
+- 卡面Spina动画（card_cartoon）解包增强：
+  - .skel 自动转两份 JSON：*.json（3.6 预览）+ *_v38.json（3.8.75 编辑器）
+  - RGB + A8 透明通道自动合成 *_merged.png，并生成 *_v38.atlas
+  - 二次解包不再误伤已生成的 JSON
+- 其他：查询菜单显示共享骨架资源名；atlas 自动复制一份 .atlas 方便编辑器打开
+
+### v1.0
+- 首个发布版：数据表查找（3D模型/Spine/歌曲/动作/谱面/舞台/卡面/语音）
+- 数据下载（按卡/按角色/按歌曲）+ LZ4 自动解压
+- 解包（模型转 FBX / 卡面 / 背景 / 语音 ACB→WAV）
+- 配套 Blender 脚本（自动贴图、表情转形态键）

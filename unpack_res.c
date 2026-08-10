@@ -5,6 +5,8 @@
 #include <windows.h>
 #include "util.h"
 #include "unpack.h"
+#include "spine_convert.h"
+#include "texture_merge.h"
 
 #define MAX_RES_ITEMS 1024
 
@@ -15,10 +17,11 @@ typedef struct {
     char folder_name[256];
     char sub[64];
     int done;
+    int spine_sub;   /* 卡面Spina动画/live2d：解包到独立 spine 子文件夹 */
 } ResUnpackItem;
 
 static void scan_res_dir(const wchar_t *chara_dir, const wchar_t *sub, const char *sub_u8,
-                         ResUnpackItem *items, int *n, const char *folder_name){
+                         ResUnpackItem *items, int *n, const char *folder_name, int spine_sub){
     wchar_t pat[1300];
     swprintf(pat, 1300, L"%ls\\%ls\\*.unity3d", chara_dir, sub);
     WIN32_FIND_DATAW fd;
@@ -32,6 +35,7 @@ static void scan_res_dir(const wchar_t *chara_dir, const wchar_t *sub, const cha
         wide_to_utf8(fd.cFileName, items[*n].name, sizeof items[*n].name);
         snprintf(items[*n].folder_name, sizeof items[*n].folder_name, "%s", folder_name);
         snprintf(items[*n].sub, sizeof items[*n].sub, "%s", sub_u8);
+        items[*n].spine_sub = spine_sub;
         wchar_t marker[1300];
         swprintf(marker, 1300, L"%ls\\%ls\\%ls.done", chara_dir, sub, fd.cFileName);
         items[*n].done = (GetFileAttributesW(marker) != INVALID_FILE_ATTRIBUTES);
@@ -72,12 +76,51 @@ static int extract_res_one(const ResUnpackItem *it, int idx){
     CloseHandle(pi.hProcess);
 
     int n = 0;
-    n += copy_dir(outdir, L"Texture2D", it->dir, L"*.png");
-    n += copy_dir(outdir, L"Texture2D", it->dir, L"*.tga");
-    n += copy_dir(outdir, L"Sprite", it->dir, L"*.png");
-    n += copy_dir(outdir, L"TextAsset", it->dir, L"*");
-    n += copy_dir(outdir, L"MonoBehaviour", it->dir, L"*.json");
-    n += copy_dir(outdir, L"AudioClip", it->dir, L"*");
+    /* 导出目标：spine 包单独放一个 spine 子文件夹，方便找 */
+    wchar_t destdir[1300];
+    wcscpy(destdir, it->dir);
+    if (it->spine_sub){
+        swprintf(destdir, 1300, L"%ls\\spine", it->dir);
+        mkdirs(destdir);
+    }
+    n += copy_dir(outdir, L"Texture2D", destdir, L"*.png");
+    n += copy_dir(outdir, L"Texture2D", destdir, L"*.tga");
+    n += copy_dir(outdir, L"Sprite", destdir, L"*.png");
+    n += copy_dir(outdir, L"TextAsset", destdir, L"*");
+    if (!it->spine_sub)
+        n += copy_dir(outdir, L"MonoBehaviour", destdir, L"*.json");
+    n += copy_dir(outdir, L"AudioClip", destdir, L"*");
+
+    /* 卡面Spina动画/live2d 解出的 .skel 自动转一份 .json，方便浏览器预览 */
+    int cn = convert_skels_in_dir(destdir);
+    if (cn > 0)
+        printf("  已转换 %d 个 skel 为 json（3.6 + 3.8.75，可用主菜单4预览）\n", cn);
+    /* atlas 导出名为 *.atlas.asset，再复制一份 *.atlas 方便 Spine 编辑器直接打开 */
+    {
+        wchar_t apat[1300];
+        swprintf(apat, 1300, L"%ls\\*.atlas.asset", destdir);
+        WIN32_FIND_DATAW afd;
+        HANDLE ah = FindFirstFileW(apat, &afd);
+        if (ah != INVALID_HANDLE_VALUE){
+            do {
+                if (afd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                wchar_t asrc[1300], adst[1300];
+                swprintf(asrc, 1300, L"%ls\\%ls", destdir, afd.cFileName);
+                wcscpy(adst, asrc);
+                wchar_t *dot = wcsrchr(adst, L'.');
+                if (dot) wcscpy(dot, L".atlas");
+                if (GetFileAttributesW(adst) == INVALID_FILE_ATTRIBUTES)
+                    CopyFileW(asrc, adst, FALSE);
+            } while (FindNextFileW(ah, &afd));
+            FindClose(ah);
+        }
+    }
+    /* 合成 RGB + A8 贴图，并生成引用它的 v38 atlas（Spine 3.8.75 编辑器用） */
+    if (it->spine_sub){
+        int mn = merge_a8_textures_in_dir(destdir);
+        if (mn > 0)
+            printf("  已合成 %d 张贴图（3.8.75 编辑器用）\n", mn);
+    }
 
     wchar_t wname[256], marker[1300];
     utf8_to_wide(it->name, wname, 256);
@@ -119,7 +162,7 @@ int unpack_resources_main(void){
             wchar_t chara_dir[1300];
             swprintf(chara_dir, 1300, L"%ls\\%ls", wroot, fd.cFileName);
             for (int s = 0; s < 6; s++)
-                scan_res_dir(chara_dir, subs[s], subs_u8[s], items, &n, chara_name);
+                scan_res_dir(chara_dir, subs[s], subs_u8[s], items, &n, chara_name, (s == 2 || s == 3));
         } while (FindNextFileW(h, &fd) && n < MAX_RES_ITEMS);
         FindClose(h);
     }

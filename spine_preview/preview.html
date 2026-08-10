@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>CGSS 卡面Spine动画预览（Spine 3.6 / JSON）</title>
+<style>
+  body { font-family: "Microsoft YaHei", sans-serif; background:#222; color:#eee; padding:16px; }
+  h1 { font-size:18px; }
+  .row { margin:8px 0; }
+  label { display:inline-block; width:130px; }
+  canvas { background:#333; border:1px solid #555; display:block; margin-top:12px; max-width:100%; }
+  select, button { padding:4px 8px; }
+  #msg { color:#f80; white-space:pre-wrap; }
+  #fps { color:#8f8; }
+</style>
+</head>
+<body>
+<h1>CGSS 卡面Spine动画预览（数据版本 3.6）</h1>
+<p>用法：骨架选 <b>5 个 SP3S301290_*.skel 或 *.skel.asset</b>（页面内自动转 JSON，也支持 .json），图集选 .atlas 或 .atlas.asset，贴图选 <b>tex.png 和 tex_A8.png</b>（A8 是透明通道，自动合成去黑边）。图层按 bg→chara→eff1→eff2→fg 自动排好。</p>
+<div class="row"><label>骨架 .skel/.asset/.json：</label><input type="file" id="f_skel" accept=".skel,.skel.asset,.json,.asset" multiple></div>
+<div class="row"><label>图集 .atlas：</label><input type="file" id="f_atlas" accept=".atlas,.atlas.asset,.asset"></div>
+<div class="row"><label>贴图 .png：</label><input type="file" id="f_png" accept=".png" multiple></div>
+<div class="row" id="anim_rows"></div>
+<div class="row">
+  <button id="btn_play">播放</button>
+  <button id="btn_pause">暂停</button>
+  <label>速度</label><input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
+  <label>显示全部层</label><input type="checkbox" id="chk_all" checked>
+  <span id="fps"></span>
+</div>
+<div id="msg"></div>
+<canvas id="cv"></canvas>
+
+<script src="spine-core.js"></script>
+<script src="spine-canvas.js"></script>
+<script src="cgss_skel_parser.js"></script>
+<script>
+var skelList = [];       // [{name, skeleton, state, data, sel, check}]
+var atlasText = null;
+var pngMap = {};         // basename -> Image
+var compositeMap = {};   // basename -> 已合成 RGBA 的 canvas
+var renderer = null, last = 0, playing = true;
+var fit = { scale: 1, tx: 0, ty: 0 };
+
+function msg(s){ document.getElementById('msg').textContent = s; }
+
+document.getElementById('f_skel').addEventListener('change', function(e){
+  skelList = [];
+  var files = Array.prototype.slice.call(e.target.files);
+  var pending = files.length;
+  files.forEach(function(f){
+    f.arrayBuffer().then(function(ab){
+      var head = new Uint8Array(ab, 0, 4);
+      var first = String.fromCharCode(head[0]);
+      var looksJson = first === '{' || first === ' ' || first === '\t' || first === '\r' || first === '\n';
+      if (!looksJson) {
+        // CGSS 二进制 skel（0x1C 头）或 .skel.asset：按二进制解析
+        var obj = CGSSSkelParser.parse(ab);
+        skelList.push({ name: f.name, text: JSON.stringify(obj) });
+        if (--pending === 0) { finishSkelLoad(files.length); }
+      } else {
+        var text = new TextDecoder('utf-8').decode(ab);
+        skelList.push({ name: f.name, text: text });
+        if (--pending === 0) { finishSkelLoad(files.length); }
+      }
+    }).catch(function(err){ msg('读取 ' + f.name + ' 失败：' + err.message); });
+  });
+});
+function finishSkelLoad(n){
+  // 按图层优先级排序：bg -> chara -> eff1 -> eff2 -> fg（其他排最后，按名字）
+  function priority(name){
+    var s = name.toLowerCase();
+    if (s.indexOf('bg') >= 0) return 0;
+    if (s.indexOf('chara') >= 0) return 1;
+    if (s.indexOf('eff1') >= 0) return 2;
+    if (s.indexOf('eff2') >= 0) return 3;
+    if (s.indexOf('fg') >= 0) return 4;
+    return 5;
+  }
+  skelList.sort(function(a, b){
+    var pa = priority(a.name), pb = priority(b.name);
+    return pa !== pb ? pa - pb : (a.name < b.name ? -1 : 1);
+  });
+  msg('已选骨架 ' + n + ' 个（已按图层排序）');
+  tryInit();
+}
+document.getElementById('f_atlas').addEventListener('change', function(e){
+  var f = e.target.files[0];
+  if (!f) return;
+  f.text().then(function(t){ atlasText = t; msg('已选图集：' + f.name); tryInit(); });
+});
+document.getElementById('f_png').addEventListener('change', function(e){
+  pngMap = {};
+  compositeMap = {};
+  var files = Array.prototype.slice.call(e.target.files);
+  var pending = files.length;
+  files.forEach(function(f){
+    var img = new Image();
+    img.onload = function(){ pngMap[f.name] = img; if (--pending === 0) { buildComposite(); msg('已选贴图 ' + files.length + ' 个'); tryInit(); } };
+    img.src = URL.createObjectURL(f);
+  });
+});
+
+// CGSS 是 RGB 主贴图 + 独立 A8 透明通道，两张合成为真正的 RGBA，去掉黑底黑边
+function buildComposite(){
+  Object.keys(pngMap).forEach(function(k){
+    var m = /^(.*)_A8\.png$/i.exec(k);
+    if (!m) return;
+    var rgbName = m[1] + '.png';
+    if (!pngMap[rgbName]) return;
+    var rgb = pngMap[rgbName], a8 = pngMap[k];
+    var c = document.createElement('canvas');
+    c.width = rgb.naturalWidth;
+    c.height = rgb.naturalHeight;
+    var cx = c.getContext('2d');
+    cx.drawImage(rgb, 0, 0, c.width, c.height);
+    cx.globalCompositeOperation = 'destination-in';  // 用 A8 的 alpha 保留 RGB
+    cx.drawImage(a8, 0, 0, c.width, c.height);
+    compositeMap[rgbName] = c;
+    msg('已合成透明度：' + rgbName + ' + ' + k);
+  });
+}
+
+function tryInit(){
+  if (!skelList.length || !atlasText || !Object.keys(pngMap).length) return;
+  try {
+    var canvas = document.getElementById('cv');
+    var ctx = canvas.getContext('2d');
+    renderer = new spine.canvas.SkeletonRenderer(ctx);
+    renderer.triangleRendering = true; // mesh 附件必须开三角形渲染
+    var loader = function(path){
+      var key = path.split(/[\\\/]/).pop();
+      if (compositeMap[key]) return new spine.canvas.CanvasTexture(compositeMap[key]);
+      var img = pngMap[key] || pngMap[Object.keys(pngMap)[0]];
+      return new spine.canvas.CanvasTexture(img);
+    };
+    var atlas = new spine.TextureAtlas(atlasText, loader);
+    var att = new spine.AtlasAttachmentLoader(atlas);
+    var j = new spine.SkeletonJson(att);
+
+    canvas.width = 1400;
+    canvas.height = 1400;
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    skelList.forEach(function(s){
+      var data = j.readSkeletonData(s.text);
+      s.skeleton = new spine.Skeleton(data);
+      s.skeleton.flipY = true;   // Spine 坐标 y 向上，canvas 是 y 向下，官方示例即此修法
+      s.state = new spine.AnimationState(new spine.AnimationStateData(data));
+      s.data = data;
+    });
+
+    var rows = document.getElementById('anim_rows');
+    rows.innerHTML = '';
+    skelList.forEach(function(s){
+      var lab = document.createElement('label');
+      lab.textContent = s.name + '：';
+      var sel = document.createElement('select');
+      s.data.animations.forEach(function(a){
+        var o = document.createElement('option');
+        o.textContent = a.name; o.value = a.name; sel.appendChild(o);
+      });
+      s.sel = sel;
+      sel.addEventListener('change', function(){
+        if (s.state && sel.value) s.state.setAnimation(0, sel.value, true);
+      });
+      var chk = document.createElement('input');
+      chk.type = 'checkbox'; chk.checked = true;
+      s.check = chk;
+      rows.appendChild(lab); rows.appendChild(sel); rows.appendChild(chk);
+      rows.appendChild(document.createElement('br'));
+      if (s.data.animations.length) s.state.setAnimation(0, s.data.animations[0].name, true);
+    });
+
+    // 计算整体包围盒并自动缩放居中
+    var offset = new spine.Vector2(), size = new spine.Vector2(), temp = [];
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    skelList.forEach(function(s){
+      s.skeleton.setToSetupPose();
+      s.skeleton.updateWorldTransform();
+      s.skeleton.getBounds(offset, size, temp);
+      if (isFinite(offset.x) && size.x > 0) {
+        minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
+        maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
+      }
+    });
+    if (isFinite(minX) && maxX > minX) {
+      var bw = maxX - minX, bh = maxY - minY;
+      fit.scale = Math.min(canvas.width / bw, canvas.height / bh) * 0.92;
+      fit.tx = (canvas.width - (maxX + minX) * fit.scale) / 2;
+      fit.ty = (canvas.height - (maxY + minY) * fit.scale) / 2;
+    } else {
+      fit.scale = 1; fit.tx = canvas.width / 2; fit.ty = canvas.height / 2;
+    }
+    msg('加载成功：' + skelList.length + ' 个骨架（自动适配画面）');
+    last = performance.now();
+    requestAnimationFrame(loop);
+  } catch (err) {
+    msg('加载失败：' + err.message + '\n' + (err.stack || ''));
+  }
+}
+
+function loop(t){
+  requestAnimationFrame(loop);
+  if (!skelList.length || !playing) return;
+  var dt = Math.min(0.05, (t - last) / 1000);
+  last = t;
+  var sp = parseFloat(document.getElementById('speed').value) || 1;
+  var canvas = document.getElementById('cv');
+  var ctx = canvas.getContext('2d');
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  ctx.setTransform(fit.scale,0,0,fit.scale,fit.tx,fit.ty);
+  skelList.forEach(function(s){
+    if (s.check && !s.check.checked) return;
+    s.state.update(dt * sp);
+    s.state.apply(s.skeleton);
+    s.skeleton.updateWorldTransform();
+    renderer.draw(s.skeleton);
+  });
+  document.getElementById('fps').textContent = ' ' + Math.round(1000 / Math.max(1, dt * 1000 / sp)) + ' fps';
+}
+
+document.getElementById('btn_play').onclick = function(){ playing = true; };
+document.getElementById('btn_pause').onclick = function(){ playing = false; };
+document.getElementById('chk_all').addEventListener('change', function(e){
+  skelList.forEach(function(s){ if (s.check) s.check.checked = e.target.checked; });
+});
+</script>
+</body>
+</html>

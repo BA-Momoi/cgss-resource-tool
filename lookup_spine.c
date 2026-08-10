@@ -37,6 +37,7 @@ static void queryspina_by_card_id(sqlite3 *db,sqlite3 *rdb){
             printf("%d|%s\n", sqlite3_column_int(stmt, 0), sqlite3_column_text(stmt, 1));
             snprintf(res,sizeof res,"card_spine_%d.unity3d",sqlite3_column_int(stmt,0));
             printf("Spine:%s\t",res);print_res_hash(rdb,res); printf("\n");
+            printf("共享骨架:spine_sprachen_petit_chara_common.unity3d\t"); print_res_hash(rdb, "spine_sprachen_petit_chara_common.unity3d"); printf("\n");
             snprintf(res, sizeof res, "card_live_%d.unity3d", sqlite3_column_int(stmt, 0));
             printf("Spine_Live:%s\t", res); print_res_hash(rdb, res); printf("\n");
             
