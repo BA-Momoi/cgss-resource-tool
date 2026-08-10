@@ -179,17 +179,26 @@ function tryInit(){
       if (s.data.animations.length) s.state.setAnimation(0, s.data.animations[0].name, true);
     });
 
-    // 计算整体包围盒并自动缩放居中
+    // 计算所选动画全程的包围盒并集，自动缩放居中
+    // （小人走路动画会离开初始位置，用全程包围盒适配才不会被甩出画面）
     var offset = new spine.Vector2(), size = new spine.Vector2(), temp = [];
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     skelList.forEach(function(s){
-      s.skeleton.setToSetupPose();
-      s.skeleton.updateWorldTransform();
-      s.skeleton.getBounds(offset, size, temp);
-      if (isFinite(offset.x) && size.x > 0) {
-        minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
-        maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
+      var anim = s.data.animations.length ? s.data.animations[0] : null;
+      var dur = anim ? anim.duration : 1;
+      var steps = Math.max(2, Math.round(dur * 30));
+      for (var k = 0; k <= steps; k++){
+        var t = dur * k / steps;
+        if (anim){ s.state.setAnimation(0, anim.name, false); s.state.update(t); }
+        s.state.apply(s.skeleton);
+        s.skeleton.updateWorldTransform();
+        s.skeleton.getBounds(offset, size, temp);
+        if (isFinite(offset.x) && size.x > 0) {
+          minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
+          maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
+        }
       }
+      if (anim) s.state.setAnimation(0, anim.name, true);
     });
     if (isFinite(minX) && maxX > minX) {
       var bw = maxX - minX, bh = maxY - minY;
