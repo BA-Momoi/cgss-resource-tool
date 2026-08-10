@@ -99,7 +99,12 @@ cmake --build build --config Release --target all -j 16
 产物只依赖 Windows 系统 DLL（gdiplus/winhttp/kernel32/msvcrt/shell32），
 **不需要安装 MinGW、不需要带任何 MinGW DLL**，拷到 Windows 10/11 上即可运行。
 
-如需动态链接（调试时更快、体积更小）：`cmake -S . -B build -DCGSS_STATIC=OFF`
+体积说明：静态版比同配置（Release）动态版大约 20 万字节（内嵌运行库的代价），
+但换来了"单 exe 免 DLL"；发布包看起来变小，是因为此前发的是 Debug 版
+（未优化 + 带调试信息），Release 优化后明显缩小，与静态无关。
+
+如需动态链接（体积略小，但要带 libgcc/libstdc++ 两个 DLL）：
+`cmake -S . -B build -DCGSS_STATIC=OFF`
 
 ## 运行
 
