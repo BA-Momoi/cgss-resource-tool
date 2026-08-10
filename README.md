@@ -90,10 +90,16 @@ CGSS/
 
 ```bash
 cmake -S . -B build
-cmake --build build --config Debug --target all -j 16
+cmake --build build --config Release --target all -j 16
 ```
 
-产物：`build/CGSS_Script.exe`
+产物：`build/CGSS_Script.exe`（Release，静态链接）
+
+默认 **静态链接**（CMake 选项 `CGSS_STATIC=ON`）：libgcc/libstdc++ 内嵌进 exe，
+产物只依赖 Windows 系统 DLL（gdiplus/winhttp/kernel32/msvcrt/shell32），
+**不需要安装 MinGW、不需要带任何 MinGW DLL**，拷到 Windows 10/11 上即可运行。
+
+如需动态链接（调试时更快、体积更小）：`cmake -S . -B build -DCGSS_STATIC=OFF`
 
 ## 运行
 

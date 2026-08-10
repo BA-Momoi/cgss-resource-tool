@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.10)
 project(CGSS_Script)
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
+option(CGSS_STATIC "静态链接 MinGW 运行库（libgcc/libstdc++），发布版推荐开启" ON)
 add_executable(CGSS_Script
     main.c
     lookup_common.c lookup_3d.c lookup_spine.c lookup_song.c lookup_action.c
@@ -14,6 +15,10 @@ add_executable(CGSS_Script
 target_link_libraries(CGSS_Script winhttp gdiplus)
 
 target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)
+
+if(CGSS_STATIC)
+    target_link_options(CGSS_Script PRIVATE -static)
+endif()
 
 # 构建后把 spine_preview 网页资源拷到 exe 同目录（主菜单 4 预览用）
 add_custom_command(TARGET CGSS_Script POST_BUILD
