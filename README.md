@@ -23,7 +23,7 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
    缺 json 自动补转，然后用默认浏览器打开 spine_preview/preview.html
    （页面支持直接选 .skel 自动转 JSON，需同时选 atlas 和 tex.png + tex_A8.png，
    A8 是透明通道，合成后特效无黑边；画面已按 Spine 坐标自动翻转）
-   - 图层顺序已自动排好：bg → chara → eff1 → eff2 → fg（页面按文件名排序）
+   - 图层顺序已自动排好：bg → eff2 → chara → eff1 → fg（页面按文件名排序）
    - 混合模式已模拟：additive 槽位用 canvas lighter 叠加、multiply 用 multiply，
      解决特效发黑/发暗的问题（bg 里 95 个 additive 槽 + eff1 全 additive 实测正常）
 
@@ -152,7 +152,7 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 
 ### v1.1（2026-08-10）
 - 新增 **Spine 预览**（主菜单 4）：扫描已解包角色，浏览器直接看卡面 Spine 动画
-  - 图层顺序自动排好（bg → chara → eff1 → eff2 → fg）
+  - 图层顺序自动排好（bg → eff2 → chara → eff1 → fg）
   - 模拟 additive / multiply 混合模式，特效不再发黑发暗
 - 新增 **Spine 2.1 共享小人骨架** 支持（spine 小人完整可用）：
   - 自动下载共享骨架 spine_sprachen_petit_chara_common.unity3d

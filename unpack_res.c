@@ -49,8 +49,10 @@ static void move_shared_template_samples(const wchar_t *dir){
     /* 需要挪走的文件前缀（共享骨架包 SPSprachen_N/s 的贴图与图集；骨架本体保留） */
     static const wchar_t *samples[] = {
         L"SPSprachen_N.png", L"SPSprachen_N.atlas", L"SPSprachen_N.atlas.asset",
+        L"SPSprachen_N.atlas.atlas", L"SPSprachen_N_Atlas.json", L"SPSprachen_N_SkeletonData.json",
         L"SPSprachen_N.skel", L"SPSprachen_N.skel.asset", L"SPSprachen_N.json", L"SPSprachen_N_v38.json",
         L"SPSprachen_s.png", L"SPSprachen_s.atlas", L"SPSprachen_s.atlas.asset",
+        L"SPSprachen_s.atlas.atlas", L"SPSprachen_s_Atlas.json", L"SPSprachen_s_SkeletonData.json",
     };
     wchar_t subdir[1300];
     swprintf(subdir, 1300, L"%ls\\模板示例(卯月杏)", dir);
@@ -110,7 +112,7 @@ static int extract_res_one(const ResUnpackItem *it, int idx){
     n += copy_dir(outdir, L"Texture2D", destdir, L"*.tga");
     n += copy_dir(outdir, L"Sprite", destdir, L"*.png");
     n += copy_dir(outdir, L"TextAsset", destdir, L"*");
-    if (!it->spine_sub)
+    if (!it->spine_sub && strcmp(it->sub, "spine") != 0)
         n += copy_dir(outdir, L"MonoBehaviour", destdir, L"*.json");
     n += copy_dir(outdir, L"AudioClip", destdir, L"*");
 
@@ -130,12 +132,35 @@ static int extract_res_one(const ResUnpackItem *it, int idx){
                 wchar_t asrc[1300], adst[1300];
                 swprintf(asrc, 1300, L"%ls\\%ls", destdir, afd.cFileName);
                 wcscpy(adst, asrc);
-                wchar_t *dot = wcsrchr(adst, L'.');
-                if (dot) wcscpy(dot, L".atlas");
+                /* 去掉尾部 .asset：SPC301346.atlas.asset -> SPC301346.atlas */
+                size_t alen = wcslen(adst);
+                if (alen > 6 && _wcsicmp(adst + alen - 6, L".asset") == 0)
+                    adst[alen - 6] = 0;
                 if (GetFileAttributesW(adst) == INVALID_FILE_ATTRIBUTES)
                     CopyFileW(asrc, adst, FALSE);
             } while (FindNextFileW(ah, &afd));
             FindClose(ah);
+        }
+        /* 清理旧版本误生成的 *.atlas.atlas（内容与 *.atlas 相同） */
+        {
+            wchar_t apat2[1300];
+            swprintf(apat2, 1300, L"%ls\\*.atlas.atlas", destdir);
+            WIN32_FIND_DATAW afd2;
+            HANDLE ah2 = FindFirstFileW(apat2, &afd2);
+            if (ah2 != INVALID_HANDLE_VALUE){
+                do {
+                    if (afd2.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+                    wchar_t adup[1300], aclean[1300];
+                    swprintf(adup, 1300, L"%ls\\%ls", destdir, afd2.cFileName);
+                    wcscpy(aclean, adup);
+                    size_t alen2 = wcslen(aclean);
+                    if (alen2 > 6 && _wcsicmp(aclean + alen2 - 6, L".atlas") == 0)
+                        aclean[alen2 - 6] = 0;   /* X.atlas.atlas -> X.atlas */
+                    if (GetFileAttributesW(aclean) != INVALID_FILE_ATTRIBUTES)
+                        DeleteFileW(adup);
+                } while (FindNextFileW(ah2, &afd2));
+                FindClose(ah2);
+            }
         }
     }
     /* 合成 RGB + A8 贴图，并生成引用它的 v38 atlas（Spine 3.8.75 编辑器用） */

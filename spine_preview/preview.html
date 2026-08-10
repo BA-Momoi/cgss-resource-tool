@@ -16,7 +16,7 @@
 </head>
 <body>
 <h1>CGSS 卡面Spine动画预览（数据版本 3.6）</h1>
-<p>用法：骨架选 <b>5 个 SP3S301290_*.skel 或 *.skel.asset</b>（页面内自动转 JSON，也支持 .json），图集选 .atlas 或 .atlas.asset，贴图选 <b>tex.png 和 tex_A8.png</b>（A8 是透明通道，自动合成去黑边）。图层按 bg→chara→eff1→eff2→fg 自动排好。</p>
+<p>用法：骨架选 <b>5 个 SP3S301290_*.skel 或 *.skel.asset</b>（页面内自动转 JSON，也支持 .json），图集选 .atlas 或 .atlas.asset，贴图选 <b>tex.png 和 tex_A8.png</b>（A8 是透明通道，自动合成去黑边）。图层按 bg→eff2→chara→eff1→fg 自动排好。</p>
 <div class="row"><label>骨架 .skel/.asset/.json：</label><input type="file" id="f_skel" accept=".skel,.skel.asset,.json,.asset" multiple></div>
 <div class="row"><label>图集 .atlas：</label><input type="file" id="f_atlas" accept=".atlas,.atlas.asset,.asset"></div>
 <div class="row"><label>贴图 .png：</label><input type="file" id="f_png" accept=".png" multiple></div>
@@ -67,13 +67,13 @@ document.getElementById('f_skel').addEventListener('change', function(e){
   });
 });
 function finishSkelLoad(n){
-  // 按图层优先级排序：bg -> chara -> eff1 -> eff2 -> fg（其他排最后，按名字）
+  // 按图层优先级排序：bg -> eff2 -> chara -> eff1 -> fg（其他排最后，按名字）
   function priority(name){
     var s = name.toLowerCase();
     if (s.indexOf('bg') >= 0) return 0;
-    if (s.indexOf('chara') >= 0) return 1;
-    if (s.indexOf('eff1') >= 0) return 2;
-    if (s.indexOf('eff2') >= 0) return 3;
+    if (s.indexOf('eff2') >= 0) return 1;
+    if (s.indexOf('chara') >= 0) return 2;
+    if (s.indexOf('eff1') >= 0) return 3;
     if (s.indexOf('fg') >= 0) return 4;
     return 5;
   }
