@@ -1,0 +1,38 @@
+# 构建产物
+/build/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+Makefile
+*.o
+*.obj
+CGSS_Script.exe
+
+# 游戏数据库（需自行获取，不入库）
+*.mdb
+*.db
+
+# 运行/下载/解包产物
+/CGSS_DOWN/
+/AssetStudio_out/
+/fbx导出对比/
+
+# 第三方二进制（Release 附件提供，不入库）
+/AssetStudio/
+/x64/
+/x86/
+acb2wavs.exe
+*.dll
+
+# 发布包
+/release/
+
+# Python
+__pycache__/
+*.pyc
+
+# 系统/编辑器
+.DS_Store
+Thumbs.db
+.vscode/
