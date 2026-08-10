@@ -18,7 +18,7 @@
 <h1>CGSS 卡面Spine动画预览（数据版本 3.6）</h1>
 <p>用法：<br>
 <b>卡面Spina动画</b>（角色目录\卡面Spina动画\spine 下）：骨架把 5 个都选上（SP3S{卡id}_bg / _chara / _eff1 / _eff2 / _fg 的 .skel 或 .skel.asset，页面自动转 JSON），图集选 SP3S{卡id}_tex.atlas(.asset)，贴图选 tex.png + tex_A8.png（A8 是透明通道，自动合成去黑边）。<br>
-<b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json（或 .skel），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。<br>
+<b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json（或 .skel 旧卡如果“大头”可选择_N后缀），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。<br>
 图层顺序自动排好：bg→eff2→chara→eff1→fg。</p>
 <div class="row"><label>骨架 .skel/.asset/.json：</label><input type="file" id="f_skel" accept=".skel,.skel.asset,.json,.asset" multiple></div>
 <div class="row"><label>图集 .atlas：</label><input type="file" id="f_atlas" accept=".atlas,.atlas.asset,.asset"></div>
