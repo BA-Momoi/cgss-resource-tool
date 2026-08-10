@@ -44,6 +44,29 @@ static void scan_res_dir(const wchar_t *chara_dir, const wchar_t *sub, const cha
     FindClose(h);
 }
 
+/* 把共享骨架包自带的模板皮肤（卯月/杏示例）挪到子文件夹，避免和卡自己的小人混在一起 */
+static void move_shared_template_samples(const wchar_t *dir){
+    /* 需要挪走的文件前缀（共享骨架包 SPSprachen_N/s 的贴图与图集；骨架本体保留） */
+    static const wchar_t *samples[] = {
+        L"SPSprachen_N.png", L"SPSprachen_N.atlas", L"SPSprachen_N.atlas.asset",
+        L"SPSprachen_N.skel", L"SPSprachen_N.skel.asset", L"SPSprachen_N.json", L"SPSprachen_N_v38.json",
+        L"SPSprachen_s.png", L"SPSprachen_s.atlas", L"SPSprachen_s.atlas.asset",
+    };
+    wchar_t subdir[1300];
+    swprintf(subdir, 1300, L"%ls\\模板示例(卯月杏)", dir);
+    mkdirs(subdir);
+    int moved = 0;
+    for (int i = 0; i < (int)(sizeof samples / sizeof samples[0]); i++){
+        wchar_t src[1300], dst[1300];
+        swprintf(src, 1300, L"%ls\\%ls", dir, samples[i]);
+        if (GetFileAttributesW(src) == INVALID_FILE_ATTRIBUTES) continue;
+        swprintf(dst, 1300, L"%ls\\%ls", subdir, samples[i]);
+        if (MoveFileW(src, dst)) moved++;
+    }
+    if (moved > 0)
+        printf("  已把共享骨架的模板示例(卯月/杏)移到 模板示例(卯月杏)\\ 子文件夹\n");
+}
+
 /* 解包单个角色资源包：导出 png/数据文件到原目录 */
 
 static int extract_res_one(const ResUnpackItem *it, int idx){
@@ -121,6 +144,9 @@ static int extract_res_one(const ResUnpackItem *it, int idx){
         if (mn > 0)
             printf("  已合成 %d 张贴图（3.8.75 编辑器用）\n", mn);
     }
+    /* 共享骨架包自带的模板皮肤（卯月/杏示例）挪到子文件夹 */
+    if (!it->spine_sub && strcmp(it->sub, "spine") == 0)
+        move_shared_template_samples(destdir);
 
     wchar_t wname[256], marker[1300];
     utf8_to_wide(it->name, wname, 256);
