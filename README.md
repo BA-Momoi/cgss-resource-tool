@@ -44,33 +44,44 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
 
 ```
 CGSS/
-├── main.c                 主菜单入口（1.查询 2.下载 3.解包）
-├── lookup_common.c        查询公共函数（hash 打印）
-├── lookup_3d.c            3D 模型查询
-├── lookup_spine.c         2D Spine 小人查询
-├── lookup_song.c          歌曲查询
-├── lookup_action.c        歌曲动作查询
-├── lookup_chart.c         谱面查询
-├── lookup_card.c          卡面查询
-├── lookup_voice.c         角色语言查询
-├── lookup_stage.c         3D 舞台查询
-├── lookup_main.c          查询主菜单
-├── lookup_table.h         查询模块公共声明
-├── download.c             数据下载（卡片/歌曲/按角色批量）
-├── net.c                  网络下载 + LZ4 解压
-├── acb.c                  ACB 音乐提取和 HCA 解码
-├── unpack.c               解包菜单 + 公共解包工具
-├── unpack_fbx.c           模型解包为 FBX
-├── unpack_res.c           角色资源解包（卡面/背景/卡面Spina动画/3d照片/spine）
-├── spine_convert.c        Spine 3.6 二进制 .skel -> JSON 转换（CGSS 大端格式）
-├── preview.c              打开 Spine 浏览器预览（主菜单 4）
-├── util.c                 公共工具（宽字符转换/目录/多选解析）
-├── GBKswapUTF8.c          编码转换
-├── sqlite3.c / sqlite3.h  SQLite 库
-├── cgss_apply_textures.py     Blender 贴图脚本（自动贴图 + 糙度=1）
-├── cgss_anim_to_shapekeys.py  Blender 形态键脚本（骨骼表情 -> 形态键）
-├── CMakeLists.txt         构建配置
-└── README.md              本文档
+├── main.c                     主菜单入口（1.查询 2.下载 3.解包 4.Spine预览）
+├── lookup_common.c / .h       查询公共函数（hash 打印）
+├── lookup_3d.c                3D 模型查询
+├── lookup_spine.c             2D Spine 小人查询
+├── lookup_song.c              歌曲查询
+├── lookup_action.c            歌曲动作查询
+├── lookup_chart.c             谱面查询
+├── lookup_card.c              卡面查询
+├── lookup_voice.c             角色语言查询
+├── lookup_stage.c             3D 舞台查询
+├── lookup_main.c              查询主菜单
+├── lookup_table.h             查询模块公共声明
+├── data.h                     数据结构定义（卡面/角色等）
+├── download.c / .h            数据下载（卡片/歌曲/按角色批量）
+├── net.c / .h                 网络下载 + LZ4 解压
+├── acb.c / .h                 ACB 音乐提取和 HCA 解码
+├── unpack.c / .h              解包菜单 + 公共解包工具
+├── unpack_fbx.c               模型解包为 FBX
+├── unpack_res.c               角色资源解包（卡面/背景/卡面Spina动画/3d照片/spine）
+├── spine_convert.c / .h       Spine 二进制 .skel -> JSON 转换（CGSS 大端格式，2.1/3.6）
+├── texture_merge.cpp / .h     RGB + A8 贴图合成（_merged.png）
+├── preview.c / .h             打开 Spine 浏览器预览（主菜单 4）
+├── util.c / .h                公共工具（宽字符转换/目录/多选解析）
+├── GBKswapUTF8.c / .h         编码转换
+├── sqlite3.c / sqlite3.h / sqlite3ext.h   SQLite 库
+├── spine_preview/             Spine 浏览器预览网页资源
+│   ├── preview.html           预览页（WebGL 渲染 + canvas 回退）
+│   ├── spine-core.js          Spine 运行时核心（解析/动画/骨骼）
+│   ├── spine-canvas.js        canvas 2D 渲染器
+│   ├── spine-webgl.js         WebGL 渲染器（无三角形接缝）
+│   ├── cgss_skel_parser.js    CGSS 二进制 .skel 浏览器端解析
+│   ├── skel2json.py / skel21_to_json.py    .skel -> JSON 转换脚本
+│   └── mp4-muxer.min.js       MP4 导出（WebCodecs H.264）
+├── cgss_apply_textures.py        Blender 贴图脚本（自动贴图 + 糙度=1）
+├── cgss_anim_to_shapekeys.py     Blender 形态键脚本（骨骼表情 -> 形态键）
+├── CMakeLists.txt               构建配置
+├── master.mdb / manifest_10133800.db   游戏数据库（不在仓库内，自行准备）
+└── README.md                     本文档
 ```
 
 ## 编译
