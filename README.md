@@ -42,6 +42,8 @@ CGSS/
 ├── util.c                 公共工具（宽字符转换/目录/多选解析）
 ├── GBKswapUTF8.c          编码转换
 ├── sqlite3.c / sqlite3.h  SQLite 库
+├── cgss_apply_textures.py     Blender 贴图脚本（自动贴图 + 糙度=1）
+├── cgss_anim_to_shapekeys.py  Blender 形态键脚本（骨骼表情 -> 形态键）
 ├── CMakeLists.txt         构建配置
 └── README.md              本文档
 ```
