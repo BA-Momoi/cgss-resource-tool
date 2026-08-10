@@ -1,4 +1,4 @@
-// unpack_res.c: 角色资源解包（卡面/背景/live2d/3d照片/spine -> png/数据）
+// unpack_res.c: 角色资源解包（卡面/背景/卡面Spina动画/3d照片/spine -> png/数据）
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -102,9 +102,9 @@ int unpack_resources_main(void){
     if (!items){ fprintf(stderr, "内存不足\n"); return 1; }
     int n = 0;
 
-    /* 角色目录下的子目录：卡面/背景/live2d/3d照片/spine */
-    const wchar_t *subs[5] = { L"卡面", L"背景", L"live2d", L"3d照片", L"spine" };
-    const char *subs_u8[5] = { "卡面", "背景", "live2d", "3d照片", "spine" };
+    /* 角色目录下的子目录：卡面/背景/卡面Spina动画(兼容旧名live2d)/3d照片/spine */
+    const wchar_t *subs[6] = { L"卡面", L"背景", L"卡面Spina动画", L"live2d", L"3d照片", L"spine" };
+    const char *subs_u8[6] = { "卡面", "背景", "卡面Spina动画", "live2d(旧)", "3d照片", "spine" };
 
     wchar_t pat[1300];
     swprintf(pat, 1300, L"%ls\\*", wroot);
@@ -118,14 +118,14 @@ int unpack_resources_main(void){
             wide_to_utf8(fd.cFileName, chara_name, sizeof chara_name);
             wchar_t chara_dir[1300];
             swprintf(chara_dir, 1300, L"%ls\\%ls", wroot, fd.cFileName);
-            for (int s = 0; s < 5; s++)
+            for (int s = 0; s < 6; s++)
                 scan_res_dir(chara_dir, subs[s], subs_u8[s], items, &n, chara_name);
         } while (FindNextFileW(h, &fd) && n < MAX_RES_ITEMS);
         FindClose(h);
     }
 
     if (n == 0){
-        printf("CGSS_DOWN 里没找到卡面/背景/live2d/3d照片/spine 资源\n");
+        printf("CGSS_DOWN 里没找到卡面/背景/卡面Spina动画/3d照片/spine 资源\n");
         free(items);
         return 1;
     }

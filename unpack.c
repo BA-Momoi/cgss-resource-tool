@@ -144,7 +144,7 @@ int unpack_main(void){
     char buf[128];
     while (1){
         printf("解包类型 1.动作解析\t2.表情/镜头\t3.模型解包为FBX\n");
-        printf("        4.角色资源解包(卡面/背景/live2d/3d照片/spine)\t5.ACB音乐提取和HCA解码\t6.返回\n");
+        printf("        4.角色资源解包(卡面/背景/卡面Spina动画/3d照片/spine)\t5.ACB音乐提取和HCA解码\t6.返回\n");
         if (fgets(buf, sizeof buf, stdin) == NULL) return 1;
         int opt = atoi(buf);
         switch (opt){

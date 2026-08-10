@@ -9,12 +9,12 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：查询�
 ### 待完善
 1. **数据表查找数据**：从 master.mdb 查 3D 模型 / 2D Spine / 歌曲 / 歌曲动作 / 谱面 / 卡面 / 角色语言 / 3D 舞台的资源文件名和 hash
 2. **数据下载并解析**：
-   - 按卡片 id 下载（卡面 6 尺寸 / 背景 / Live2D / 3D 照片 / 语音 / Spine / 3D 模型 / 台词）
+- 按卡片 id 下载（卡面 6 尺寸 / 背景 / 卡面Spina动画 / 3D 照片 / 语音 / Spine / 3D 模型 / 台词）
    - 按歌曲 id 下载（音频 acb / 封面 / 动作 / 谱面 / 舞台 / 导演包）
    - 按角色 chara_id 批量下载（列出该角色全部卡，多选或全选，资源类型一次选择）
 3. **解包**：
    - 模型解包为 FBX（调用 AssetStudio.CLI）
-   - 角色资源解包（卡面 / 背景 / live2d / 3d照片 / spine → png / 数据文件）
+   - 角色资源解包（卡面 / 背景 / 卡面Spina动画 / 3d照片 / spine → png / 数据文件）
    - ACB 音乐提取和 HCA 解码（acb2wavs）
 
 ## 目录结构
@@ -38,7 +38,7 @@ CGSS/
 ├── acb.c                  ACB 音乐提取和 HCA 解码
 ├── unpack.c               解包菜单 + 公共解包工具
 ├── unpack_fbx.c           模型解包为 FBX
-├── unpack_res.c           角色资源解包（卡面/背景/live2d/3d照片/spine）
+├── unpack_res.c           角色资源解包（卡面/背景/卡面Spina动画/3d照片/spine）
 ├── util.c                 公共工具（宽字符转换/目录/多选解析）
 ├── GBKswapUTF8.c          编码转换
 ├── sqlite3.c / sqlite3.h  SQLite 库

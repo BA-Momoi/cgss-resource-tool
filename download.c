@@ -81,11 +81,11 @@ static int query_card(sqlite3 *db, int card_id, char *cname, int n, int *chara_i
 
 static void print_card_res_menu(void){
     printf("可选资源（空格/逗号分隔数字，a=全部，0=开始下载）：\n");
-    printf("1.卡面(6尺寸)\t2.背景(普通/竖版/小横版)\t3.Live2D\n");
+    printf("1.卡面(6尺寸)\t2.背景(普通/竖版/小横版)\t3.卡面Spina动画\n");
     printf("4.3D照片(L/S)\t5.语音\t6.Spine小人\t7.3D模型\t8.台词文本\n");
 }
 
-/* 按卡片构建并下载选中的资源（卡面/背景/live2d/3d照片/语音/spine/3d模型/台词） */
+/* 按卡片构建并下载选中的资源（卡面/背景/卡面Spina动画/3d照片/语音/spine/3d模型/台词） */
 
 static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char *cname,
                               int chara_id, int dress_id, const int *sel, int nsel){
@@ -118,7 +118,7 @@ static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char
     }
     if (selected(sel, nsel, 3)){
         snprintf(res, sizeof res, "card_cartoon_%d.unity3d", card_id);
-        add_item(rdb, items, &n, res, L"live2d");
+        add_item(rdb, items, &n, res, L"卡面Spina动画");
     }
     if (selected(sel, nsel, 4)){
         snprintf(res, sizeof res, "idol_3d_%d_l.unity3d", card_id);

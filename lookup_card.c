@@ -53,7 +53,7 @@ static void querycardimg_by_card_id(sqlite3 *db, sqlite3 *rdb){
             snprintf(res, sizeof res, "idol_3d_%d_s.unity3d", card_id);
             printf("3D照片(S):%s\t", res); print_res_hash(rdb, res); printf("\n");
             snprintf(res, sizeof res, "card_cartoon_%d.unity3d", card_id);
-            printf("Live2D:%s\t", res); print_res_hash(rdb, res); printf("\n");
+            printf("卡面Spina动画:%s\t", res); print_res_hash(rdb, res); printf("\n");
         } else {
             fprintf(stderr, "没有相关卡片\n");
         }
