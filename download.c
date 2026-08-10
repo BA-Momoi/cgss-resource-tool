@@ -213,10 +213,33 @@ static void dl_card(sqlite3 *db, sqlite3 *rdb){
 
 static void dl_chara(sqlite3 *db, sqlite3 *rdb){
     char buf[128];
-    printf("请输入角色id（chara_id）：\n");
+    printf("请输入角色id（chara_id，输卡id也能自动识别）：\n");
     if (fgets(buf, sizeof buf, stdin) == NULL) return;
     int chara_id = atoi(buf);
     if (chara_id <= 0){ fprintf(stderr, "输入错误\n"); return; }
+
+    /* 自动识别：输入卡id也能用——先看这个数是不是角色id（该角色有没有卡），
+       没有的话再当卡id查一次，解析出真正的角色id */
+    sqlite3_stmt *chk = NULL;
+    int cnt = 0;
+    if (sqlite3_prepare_v2(db, "SELECT COUNT(*) FROM card_data WHERE chara_id=?", -1, &chk, NULL) == SQLITE_OK){
+        sqlite3_bind_int(chk, 1, chara_id);
+        if (sqlite3_step(chk) == SQLITE_ROW) cnt = sqlite3_column_int(chk, 0);
+        sqlite3_finalize(chk);
+    }
+    if (cnt == 0){
+        chk = NULL;
+        if (sqlite3_prepare_v2(db, "SELECT chara_id,name FROM card_data WHERE id=?", -1, &chk, NULL) == SQLITE_OK){
+            sqlite3_bind_int(chk, 1, chara_id);
+            if (sqlite3_step(chk) == SQLITE_ROW){
+                int real = sqlite3_column_int(chk, 0);
+                printf("检测到 %d 是卡id -> 角色id %d（%s）\n", chara_id, real,
+                       (const char*)sqlite3_column_text(chk, 1));
+                chara_id = real;
+            }
+            sqlite3_finalize(chk);
+        }
+    }
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db,
