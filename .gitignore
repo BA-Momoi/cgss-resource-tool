@@ -8,6 +8,7 @@ Makefile
 *.o
 *.obj
 CGSS_Script.exe
+*.bat
 
 # 游戏数据库（需自行获取，不入库）
 *.mdb
