@@ -16,7 +16,10 @@
 </head>
 <body>
 <h1>CGSS 卡面Spine动画预览（数据版本 3.6）</h1>
-<p>用法：骨架选 <b>5 个 SP3S301290_*.skel 或 *.skel.asset</b>（页面内自动转 JSON，也支持 .json），图集选 .atlas 或 .atlas.asset，贴图选 <b>tex.png 和 tex_A8.png</b>（A8 是透明通道，自动合成去黑边）。图层按 bg→eff2→chara→eff1→fg 自动排好。</p>
+<p>用法：<br>
+<b>卡面Spina动画</b>（角色目录\卡面Spina动画\spine 下）：骨架把 5 个都选上（SP3S{卡id}_bg / _chara / _eff1 / _eff2 / _fg 的 .skel 或 .skel.asset，页面自动转 JSON），图集选 SP3S{卡id}_tex.atlas(.asset)，贴图选 tex.png + tex_A8.png（A8 是透明通道，自动合成去黑边）。<br>
+<b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json（或 .skel），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。<br>
+图层顺序自动排好：bg→eff2→chara→eff1→fg。</p>
 <div class="row"><label>骨架 .skel/.asset/.json：</label><input type="file" id="f_skel" accept=".skel,.skel.asset,.json,.asset" multiple></div>
 <div class="row"><label>图集 .atlas：</label><input type="file" id="f_atlas" accept=".atlas,.atlas.asset,.asset"></div>
 <div class="row"><label>贴图 .png：</label><input type="file" id="f_png" accept=".png" multiple></div>
