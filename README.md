@@ -26,6 +26,9 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
    - 图层顺序已自动排好：bg → eff2 → chara → eff1 → fg（页面按文件名排序）
    - 混合模式已模拟：additive 槽位用 canvas lighter 叠加、multiply 用 multiply，
      解决特效发黑/发暗的问题（bg 里 95 个 additive 槽 + eff1 全 additive 实测正常）
+   - **导出MP4**：页面有“导出MP4”按钮，用 WebCodecs 硬编码 H.264（Main 高码率），
+     30fps、尺寸以背景(bg)包围盒为界（无 bg 时用全部图层包围盒，上限 4096），
+     导出完成自动下载 .mp4（需新版 Chrome/Edge）
 
 ## Spine 编辑器（3.8.75）使用
 

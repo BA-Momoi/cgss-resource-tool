@@ -29,6 +29,8 @@
   <button id="btn_pause">暂停</button>
   <label>速度</label><input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
   <label>显示全部层</label><input type="checkbox" id="chk_all" checked>
+  <button id="btn_export" title="按背景(bg)范围导出 MP4（最高码率）">导出MP4</button>
+  <span id="export_status"></span>
   <span id="fps"></span>
 </div>
 <div id="msg"></div>
@@ -37,6 +39,7 @@
 <script src="spine-core.js"></script>
 <script src="spine-canvas.js"></script>
 <script src="cgss_skel_parser.js"></script>
+<script src="mp4-muxer.min.js"></script>
 <script>
 var skelList = [];       // [{name, skeleton, state, data, sel, check}]
 var atlasText = null;
@@ -230,6 +233,174 @@ document.getElementById('btn_pause').onclick = function(){ playing = false; };
 document.getElementById('chk_all').addEventListener('change', function(e){
   skelList.forEach(function(s){ if (s.check) s.check.checked = e.target.checked; });
 });
+
+/* ================= MP4 导出（WebCodecs H.264 + mp4-muxer） =================
+ * 画布范围以 bg（背景）骨架为界；没有 bg 时用全部图层包围盒。
+ * 最高规格：30fps（数据原生帧率）+ 高码率 H.264，尺寸取背景实际大小（偶数，上限 4096）。
+ */
+function findAnim(s){
+  var name = s.sel && s.sel.value ? s.sel.value : (s.data.animations[0] ? s.data.animations[0].name : null);
+  if (!name) return null;
+  for (var i = 0; i < s.data.animations.length; i++)
+    if (s.data.animations[i].name === name) return s.data.animations[i];
+  return null;
+}
+
+function exportBounds(){
+  var fps = 30, dur = 0;
+  skelList.forEach(function(s){
+    var a = findAnim(s);
+    if (a && a.duration > dur) dur = a.duration;
+  });
+  if (!(dur > 0)) dur = 8;
+  var bg = null;
+  skelList.forEach(function(s){ if (/bg/i.test(s.name)) bg = s; });
+  var targets = bg ? [bg] : skelList;
+  var offset = new spine.Vector2(), size = new spine.Vector2(), temp = [];
+  var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+  var steps = Math.max(2, Math.round(dur * fps));
+  for (var i = 0; i <= steps; i++){
+    var t = dur * i / steps;
+    targets.forEach(function(s){
+      var an = findAnim(s);
+      if (!an) return;
+      s.state.setAnimation(0, an.name, false);
+      s.state.update(t);
+      s.state.apply(s.skeleton);
+      s.skeleton.updateWorldTransform();
+      s.skeleton.getBounds(offset, size, temp);
+      if (isFinite(offset.x) && size.x > 0){
+        minX = Math.min(minX, offset.x); minY = Math.min(minY, offset.y);
+        maxX = Math.max(maxX, offset.x + size.x); maxY = Math.max(maxY, offset.y + size.y);
+      }
+    });
+  }
+  if (!isFinite(minX) || !(maxX > minX)){ minX = -600; minY = -600; maxX = 600; maxY = 600; }
+  return { minX: minX, minY: minY, maxX: maxX, maxY: maxY, duration: dur, fps: fps };
+}
+
+function exportMp4Name(){
+  for (var i = 0; i < skelList.length; i++){
+    if (/bg/i.test(skelList[i].name)){
+      var m = /SP3S(\d+)/.exec(skelList[i].name);
+      if (m) return 'SP3S' + m[1];
+    }
+  }
+  var m2 = /(SPC\d+|SP3S\d+)/.exec(skelList.length ? skelList[0].name : '');
+  return m2 ? m2[1] : 'export';
+}
+
+function exportMP4(){
+  if (!skelList.length){ msg('请先加载骨架'); return; }
+  if (!window.VideoEncoder || !window.VideoFrame){ msg('当前浏览器不支持 WebCodecs，无法导出 MP4（请用新版 Chrome/Edge）'); return; }
+  if (typeof Mp4Muxer === 'undefined'){ msg('缺少 mp4-muxer.min.js'); return; }
+  var b = exportBounds();
+  var w = Math.floor(b.maxX - b.minX), h = Math.floor(b.maxY - b.minY);
+  var maxDim = 4096;
+  var sc = Math.min(1, maxDim / Math.max(w, h));
+  w = Math.max(2, Math.floor(w * sc)); h = Math.max(2, Math.floor(h * sc));
+  if (w % 2) w--; if (h % 2) h--;
+  var btn = document.getElementById('btn_export');
+  var st = document.getElementById('export_status');
+  btn.disabled = true;
+  st.textContent = '准备中（' + w + 'x' + h + '，' + b.duration.toFixed(1) + 's @ ' + b.fps + 'fps）...';
+
+  var canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  var ctx = canvas.getContext('2d');
+  var expRenderer = new spine.canvas.SkeletonRenderer(ctx);
+  expRenderer.triangleRendering = true;
+
+  var muxer = new Mp4Muxer.Muxer({
+    target: new Mp4Muxer.ArrayBufferTarget(),
+    video: { codec: 'avc', width: w, height: h, frameRate: b.fps },
+    fastStart: 'in-memory'
+  });
+  var bitrate = Math.min(100000000, Math.round(w * h * b.fps * 0.7));
+  var encoder = new VideoEncoder({
+    output: function(chunk, meta){ muxer.addVideoChunk(chunk, meta); },
+    error: function(e){ console.error(e); st.textContent = '编码错误：' + e.message; btn.disabled = false; }
+  });
+
+  (function configure(){
+    var tried = 0;
+    function next(){
+      tried++;
+      if (tried > 2){ st.textContent = '浏览器不支持 H.264 编码'; btn.disabled = false; return; }
+      var codec = tried === 1 ? 'avc1.4d002a' : 'avc1.42001f';
+      VideoEncoder.isConfigSupported({ codec: codec, width: w, height: h, bitrate: bitrate, framerate: b.fps, avc: { format: 'avc' } })
+        .then(function(info){
+          if (info.supported){
+            encoder.configure({ codec: codec, width: w, height: h, bitrate: bitrate, framerate: b.fps, avc: { format: 'avc' } });
+            start();
+          } else next();
+        }).catch(next);
+    }
+    next();
+  })();
+
+  var s = Math.min(w / (b.maxX - b.minX), h / (b.maxY - b.minY));
+  var tx = -b.minX * s + (w - (b.maxX - b.minX) * s) / 2;
+  var ty = -b.minY * s + (h - (b.maxY - b.minY) * s) / 2;
+
+  function drawFrame(t){
+    ctx.setTransform(1,0,0,1,0,0);
+    ctx.fillStyle = '#333';
+    ctx.fillRect(0,0,w,h);
+    ctx.setTransform(s,0,0,s,tx,ty);
+    skelList.forEach(function(sk){
+      if (sk.check && !sk.check.checked) return;
+      var an = findAnim(sk);
+      if (!an) return;
+      sk.state.setAnimation(0, an.name, false);
+      sk.state.update(t);
+      sk.state.apply(sk.skeleton);
+      sk.skeleton.updateWorldTransform();
+      expRenderer.draw(sk.skeleton);
+    });
+  }
+
+  var total = Math.ceil(b.duration * b.fps);
+  var i = 0;
+  function step(){
+    if (i >= total){ finish(); return; }
+    drawFrame(i / b.fps);
+    var vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / b.fps) });
+    encoder.encode(vf, { keyFrame: i % (b.fps * 2) === 0 });
+    vf.close();
+    i++;
+    if (i % 12 === 0 || i === total){
+      st.textContent = '编码中 ' + i + '/' + total + ' 帧';
+      setTimeout(step, 0);
+    } else {
+      step();
+    }
+  }
+  function start(){ st.textContent = '导出中（' + w + 'x' + h + '）...'; setTimeout(step, 30); }
+
+  async function finish(){
+    try {
+      await encoder.flush();
+      muxer.finalize();
+      var blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
+      var name = 'CGSS_' + exportMp4Name() + '_' + w + 'x' + h + '_' + b.fps + 'fps.mp4';
+      var a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = name;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+      st.textContent = '已导出 ' + name;
+      msg('导出完成：' + name + '（' + w + 'x' + h + '，' + b.fps + 'fps，最高码率）');
+    } catch(e){
+      console.error(e);
+      st.textContent = '导出失败：' + e.message;
+    }
+    btn.disabled = false;
+  }
+}
+
+document.getElementById('btn_export').onclick = exportMP4;
 </script>
 </body>
 </html>
