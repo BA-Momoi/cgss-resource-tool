@@ -120,5 +120,6 @@ int open_spine_preview(void){
     printf("  图集：SP3S301290_tex.atlas（改成对应卡片的文件名）\n");
     printf("  贴图：对应的 tex.png 和 tex_A8.png（A8 是透明通道，合成后无黑边）\n");
     printf("  要导入 Spine 3.8.75 编辑器：打开 *_v38.json + *_v38.atlas + *_merged.png\n");
+    printf("  小人提示：旧卡小人若显示\"大头\"，请把骨架换成 SPSprachen_N.json（spine 根目录里）\n");
     return 0;
 }

@@ -65,6 +65,19 @@ static void move_shared_template_samples(const wchar_t *dir){
         swprintf(dst, 1300, L"%ls\\%ls", subdir, samples[i]);
         if (MoveFileW(src, dst)) moved++;
     }
+    /* N 骨架是旧卡小人用的（旧卡用 s 会"大头"），在 spine 根目录也保留一份方便使用 */
+    static const wchar_t *keepN[] = {
+        L"SPSprachen_N.skel", L"SPSprachen_N.skel.asset",
+        L"SPSprachen_N.json", L"SPSprachen_N_v38.json"
+    };
+    for (int i = 0; i < (int)(sizeof keepN / sizeof keepN[0]); i++){
+        wchar_t src[1300], dst[1300];
+        swprintf(src, 1300, L"%ls\\%ls", subdir, keepN[i]);
+        swprintf(dst, 1300, L"%ls\\%ls", dir, keepN[i]);
+        if (GetFileAttributesW(src) != INVALID_FILE_ATTRIBUTES &&
+            GetFileAttributesW(dst) == INVALID_FILE_ATTRIBUTES)
+            CopyFileW(src, dst, FALSE);
+    }
     if (moved > 0)
         printf("  已把共享骨架的模板示例(卯月/杏)移到 模板示例(卯月杏)\\ 子文件夹\n");
 }
