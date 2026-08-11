@@ -168,3 +168,122 @@ int merge_a8_textures_in_dir(const wchar_t *dir){
     FindClose(h);
     return n;
 }
+
+/* ---------------- 贴纸 PNG 裁剪 ---------------- */
+int crop_png_region(const wchar_t *src_png, int x, int y, int w, int h,
+                    int rotate, const wchar_t *dst_png){
+    if (!src_png || !dst_png || w <= 0 || h <= 0) return 0;
+    ULONG_PTR token = 0;
+    GdiplusStartupInput si;
+    si.GdiplusVersion = 1;
+    si.DebugEventCallback = NULL;
+    si.SuppressBackgroundThread = FALSE;
+    si.SuppressExternalCodecs = FALSE;
+    if (GdiplusStartup(&token, &si, NULL) != Ok) return 0;
+
+    Bitmap *src = Bitmap::FromFile(src_png);
+    if (!src || src->GetLastStatus() != Ok){
+        delete src;
+        GdiplusShutdown(token);
+        return 0;
+    }
+    UINT sw = src->GetWidth(), sh = src->GetHeight();
+    if (x < 0 || y < 0 || (UINT)(x + w) > sw || (UINT)(y + h) > sh){
+        printf("  裁剪区域超出贴图范围 %ls (%d,%d %dx%d / %ux%u)\n",
+               src_png, x, y, w, h, sw, sh);
+        delete src;
+        GdiplusShutdown(token);
+        return 0;
+    }
+
+    int result = 0;
+    {
+        Bitmap *crop = new Bitmap(w, h, PixelFormat32bppARGB);
+        if (crop && crop->GetLastStatus() == Ok){
+            Graphics g(crop);
+            g.SetInterpolationMode(InterpolationModeNearestNeighbor);
+            g.SetPixelOffsetMode(PixelOffsetModeHalf);
+            g.DrawImage(src, Rect(0, 0, w, h), x, y, w, h, UnitPixel);
+            if (rotate) crop->RotateFlip(Rotate90FlipNone);
+            CLSID clsid;
+            if (get_png_encoder_clsid(&clsid) == 0 &&
+                crop->Save(dst_png, &clsid, NULL) == Ok)
+                result = 1;
+        }
+        delete crop;
+    }
+    delete src;
+    GdiplusShutdown(token);
+    return result;
+}
+
+static void trim_line(char *s){
+    size_t l = strlen(s);
+    while (l > 0 && (s[l-1] == '\r' || s[l-1] == '\n' || s[l-1] == ' ' || s[l-1] == '\t'))
+        s[--l] = 0;
+    char *p = s;
+    while (*p == ' ' || *p == '\t') p++;
+    if (p != s) memmove(s, p, strlen(p) + 1);
+}
+
+int crop_atlas_regions(const wchar_t *atlas_path, const wchar_t *png_path,
+                       const wchar_t *out_dir, const wchar_t *prefix){
+    FILE *f = _wfopen(atlas_path, L"rb");
+    if (!f) return 0;
+    fseek(f, 0, SEEK_END);
+    long sz = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    if (sz <= 0 || sz > 4 * 1024 * 1024){ fclose(f); return 0; }
+    char *buf = (char*)malloc((size_t)sz + 1);
+    if (!buf){ fclose(f); return 0; }
+    if (fread(buf, 1, (size_t)sz, f) != (size_t)sz){
+        free(buf); fclose(f); return 0;
+    }
+    buf[sz] = 0;
+    fclose(f);
+
+    /* 每个区域: [index, rotate, xy, size]；atlas 区域从 1 开始编号 */
+    int xs[32] = {0}, ys[32] = {0}, ws[32] = {0}, hs[32] = {0}, rt[32] = {0}, valid[32] = {0};
+    int cur = -1;
+    char line[512];
+    char *p = buf;
+    while (*p && cur < 32){
+        size_t i = 0;
+        while (p[i] && p[i] != '\n' && i < sizeof line - 1){ line[i] = p[i]; i++; }
+        line[i] = 0;
+        p += i;
+        if (*p == '\n') p++;
+        trim_line(line);
+        if (!line[0]) continue;
+        if (line[0] >= '0' && line[0] <= '9'){
+            char *end = NULL;
+            long v = strtol(line, &end, 10);
+            if (end && *end == 0 && v >= 1 && v <= 32){
+                cur = (int)v - 1;
+                valid[cur] = 1;
+            } else {
+                cur = -1;
+            }
+            continue;
+        }
+        if (cur < 0 || !valid[cur]) continue;
+        if (strncmp(line, "rotate:", 7) == 0){
+            rt[cur] = (strstr(line, "true") != NULL);
+        } else if (strncmp(line, "xy:", 3) == 0){
+            sscanf(line + 3, "%d,%d", &xs[cur], &ys[cur]);
+        } else if (strncmp(line, "size:", 5) == 0){
+            sscanf(line + 5, "%d,%d", &ws[cur], &hs[cur]);
+        }
+    }
+    free(buf);
+
+    int n = 0;
+    for (int i = 0; i < 32; i++){
+        if (!valid[i] || ws[i] <= 0 || hs[i] <= 0) continue;
+        wchar_t dst[1300];
+        swprintf(dst, 1300, L"%ls\\%ls_%d.png", out_dir, prefix, i + 1);
+        if (crop_png_region(png_path, xs[i], ys[i], ws[i], hs[i], rt[i], dst))
+            n++;
+    }
+    return n;
+}

@@ -37,3 +37,6 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .vscode/
+
+# 本地文档（master_mdb 手册 / cysp 说明等，不随发布上传）
+docs/

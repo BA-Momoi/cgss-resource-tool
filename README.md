@@ -176,6 +176,15 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 -> 1.4 -> 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x -> 2.0
 
+### v1.4（2026-08-11）
+- **新增贴纸动作下载与解包（310 个）**：下载类型新增「4.贴纸动作」
+  - 全部 `spine_motion_sticker_*.unity3d` 下载到 `CGSS_DOWN\贴纸\原文件unity3d\`
+  - 自动解出 spine 文件（skel / atlas / png / json / v38 json）到 `spine文件\SPMotionSticker_XXXXX\`
+  - 按 atlas 把每张贴纸裁成两帧 PNG 到 `贴纸PNG\SPMotionSticker_XXXXX_1.png / _2.png`
+  - 支持断点续跑：已下载/已解包的自动跳过
+- **预览小人镜像可切换**：新增「左右镜像(flip)」勾选框（flip 骨骼 scaleX -1/1）
+- 预览加载后自动提示检测到 N 骨架（老卡）还是 s 骨架（新卡），选错不会大头
+
 ### v1.31（2025-8-11）
 - **spine预览增加对老卡骨架选择提示**
 

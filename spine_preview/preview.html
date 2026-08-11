@@ -18,7 +18,7 @@
 <h1>CGSS 卡面Spine动画预览（数据版本 3.6）</h1>
 <p>用法：<br>
 <b>卡面Spina动画</b>（角色目录\卡面Spina动画\spine 下）：骨架把 5 个都选上（SP3S{卡id}_bg / _chara / _eff1 / _eff2 / _fg 的 .skel 或 .skel.asset，页面自动转 JSON），图集选 SP3S{卡id}_tex.atlas(.asset)，贴图选 tex.png + tex_A8.png（A8 是透明通道，自动合成去黑边）。<br>
-<b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json（或 .skel 旧卡如果“大头”可选择_N后缀），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。<br>
+<b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json / SPSprachen_N.json（<b>老卡用 N、新卡用 s</b>，拿不准两个都试，头身比例正常的是对的），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。人物左右反了就用下面的「左右镜像(flip)」勾选框切换。<br>
 图层顺序自动排好：bg→eff2→chara→eff1→fg。</p>
 <div class="row"><label>骨架 .skel/.asset/.json：</label><input type="file" id="f_skel" accept=".skel,.skel.asset,.json,.asset" multiple></div>
 <div class="row"><label>图集 .atlas：</label><input type="file" id="f_atlas" accept=".atlas,.atlas.asset,.asset"></div>
@@ -29,6 +29,7 @@
   <button id="btn_pause">暂停</button>
   <label>速度</label><input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
   <label>显示全部层</label><input type="checkbox" id="chk_all" checked>
+  <label>左右镜像(flip)</label><input type="checkbox" id="chk_flip" checked>
   <button id="btn_export" title="按背景(bg)范围导出 MP4（最高码率）">导出MP4(beta)</button>
   <span id="export_status"></span>
   <span id="fps"></span>
@@ -56,11 +57,11 @@ var expGL = null, expGLCanvas = null;
 
 function msg(s){ document.getElementById('msg').textContent = s; }
 
-// 小人骨架（SPSprachen）用 flip 骨骼控制左右镜像：
-// 动画数据是向右走，但美术朝向是左视，镜像(scaleX=-1)后角色看向移动方向。
+// 小人骨架（SPSprachen）用 flip 骨骼控制左右镜像。
+// 勾选 = scaleX -1（默认），不勾选 = 数据原样 scaleX 1。
 function applyPetitFlip(s){
   if (s.flipBone === undefined) s.flipBone = s.skeleton.findBone('flip') || null;
-  if (s.flipBone) s.flipBone.scaleX = -1;
+  if (s.flipBone) s.flipBone.scaleX = document.getElementById('chk_flip').checked ? -1 : 1;
 }
 
 document.getElementById('f_skel').addEventListener('change', function(e){
@@ -108,7 +109,18 @@ function finishSkelLoad(n){
     var pa = priority(a.name), pb = priority(b.name);
     return pa !== pb ? pa - pb : (a.name < b.name ? -1 : 1);
   });
-  msg('已选骨架 ' + n + ' 个（已按图层排序）');
+  var hint = '';
+  try {
+    var sk = skelList.length ? JSON.parse(skelList[0].text) : null;
+    if (sk && sk.bones){
+      var shadow = null;
+      for (var i = 0; i < sk.bones.length; i++)
+        if (sk.bones[i].name === 'shadow'){ shadow = sk.bones[i]; break; }
+      var isN = shadow && typeof shadow.scaleX === 'number' && Math.abs(shadow.scaleX) < 1;
+      hint = isN ? '（检测到 N 骨架：老卡用）' : '（检测到 s 骨架：新卡用）';
+    }
+  } catch(e){}
+  msg('已选骨架 ' + n + ' 个（已按图层排序）' + hint);
   tryInit();
 }
 document.getElementById('f_atlas').addEventListener('change', function(e){
