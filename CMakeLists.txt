@@ -16,8 +16,15 @@ target_link_libraries(CGSS_Script winhttp gdiplus)
 
 target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)
 
+# 独立的资源清单更新检查工具（check_update.exe）
+add_executable(check_update
+    check_update.c)
+target_link_libraries(check_update winhttp)
+target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
+
 if(CGSS_STATIC)
     target_link_options(CGSS_Script PRIVATE -static)
+    target_link_options(check_update PRIVATE -static)
 endif()
 
 # 构建后把 spine_preview 网页资源拷到 exe 同目录（主菜单 4 预览用）

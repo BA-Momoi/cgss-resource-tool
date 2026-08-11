@@ -47,6 +47,26 @@ const char *base_name(const char *name){
     return p ? p + 1 : name;
 }
 
+/* 扫描当前目录 manifest_*.db，返回版本号最大的文件名（静态缓冲，NULL=没有） */
+
+const char *find_manifest(void){
+    static char path[260];
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA("manifest_*.db", &fd);
+    long long best = -1;
+    if (h == INVALID_HANDLE_VALUE) return NULL;
+    do {
+        if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) continue;
+        long long v = 0;
+        if (sscanf(fd.cFileName, "manifest_%lld.db", &v) == 1 && v > best){
+            best = v;
+            snprintf(path, sizeof path, "%s", fd.cFileName);
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return best > 0 ? path : NULL;
+}
+
 /* ================== LZ4 块解压（移植 cgss_lz4.py） ================== */
 
 

@@ -9,28 +9,29 @@
 #include "sqlite3.h"
 #include "lookup_table.h"
 #include "GBKswapUTF8.h"
+#include "util.h"
 
 #define DB_PATH "master.mdb"
-#define MANIFEST_PATH "manifest_10133800.db"
 
 // ?????
 int lookup_main(void){
     sqlite3 *db = NULL;    // 游戏主库
     sqlite3 *rdb = NULL;   // 资源清单库
+    const char *mp = find_manifest();
     if (GetFileAttributesA(DB_PATH) == INVALID_FILE_ATTRIBUTES){
         fprintf(stderr, "缺少 master.mdb，请把它放到程序同目录\n");
         return -1;
     }
-    if (GetFileAttributesA(MANIFEST_PATH) == INVALID_FILE_ATTRIBUTES){
-        fprintf(stderr, "缺少 manifest_10133800.db，请把它放到程序同目录\n");
+    if (!mp){
+        fprintf(stderr, "缺少 manifest_*.db（资源清单库），请先运行 check_update.exe 获取\n");
         return -1;
     }
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK) {
         fprintf(stderr, "打开 master.mdb 失败（%s）\n", sqlite3_errmsg(db));
         return -1;
     }
-    if (sqlite3_open(MANIFEST_PATH, &rdb) != SQLITE_OK) {
-        fprintf(stderr, "打开 manifest_10133800.db 失败（%s）\n", sqlite3_errmsg(rdb));
+    if (sqlite3_open(mp, &rdb) != SQLITE_OK) {
+        fprintf(stderr, "打开 %s 失败（%s）\n", mp, sqlite3_errmsg(rdb));
         sqlite3_close(db);
         return -1;
     }
