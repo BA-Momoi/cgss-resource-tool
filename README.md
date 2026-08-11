@@ -151,7 +151,7 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 
 - `CGSS_Script.exe` + 依赖（AssetStudio / acb2wavs / Blender 脚本 / 2026.8.2的manifest.db&master.mdb）
 - `*_nodb.zip` 为没有manifest.db&master.db版本
-下载后解压，把数据库放进同一目录，双击 `CGSS_Script.exe` 即可使用。
+下载后解压，把自己提取的数据库放进同一目录，双击 `CGSS_Script.exe` 即可使用。
 
 ## Spine 小人（SPC，card_spine）说明
 
