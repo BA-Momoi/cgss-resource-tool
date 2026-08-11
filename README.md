@@ -127,8 +127,8 @@ cmake --build build --config Release --target all -j 16
 - 解包报"启动 AssetStudio.CLI 失败"：安装 .NET 7 Desktop Runtime
 - 语音解码无输出：确认 acb2wavs.exe 和同目录 DLL 未被杀毒软件删除
 - 找不到数据库：保持 master.mdb / manifest_10133800.db 与 exe 同目录
-- CLI 导出的 FBX 没有动作：AssetStudio CLI 的硬限制，带动作的 FBX 需用 GUI 全选导出
-  （解包菜单内有详细步骤）
+- CLI 导出的 FBX 身体没有贴图：带贴图的 body_FBX 需用 GUI 导出
+  （我现在也确实没招了，解包菜单内有详细步骤）
 
 ## 从 GitHub 获取
 
@@ -149,15 +149,15 @@ cmake --build build --config Release --target all -j 16
 
 GitHub Releases 里提供编译好的完整工具包（zip）：
 
-- `CGSS_Script.exe` + 依赖（AssetStudio / acb2wavs / Blender 脚本）
-- 数据库请按上文说明准备
-
+- `CGSS_Script.exe` + 依赖（AssetStudio / acb2wavs / Blender 脚本 / 2026.8.2的manifest.db&master.mdb）
+- `*_nodb.zip` 为没有manifest.db&master.db版本
 下载后解压，把数据库放进同一目录，双击 `CGSS_Script.exe` 即可使用。
 
 ## Spine 小人（SPC，card_spine）说明
 
 - 程序里“Spine小人”下载的是 card_spine_{卡id}.unity3d（贴图+图集），
   同时会自动下载**共享小人骨架** spine_sprachen_petit_chara_common.unity3d。
+  （其他骨架待我研究）
 - 共享骨架（SPSprachen_s.skel）是 **Spine 2.1 格式**（CGSS 头 + 大端浮点），
   工具内置 2.1 → JSON 转换（spine_convert.c），解包时自动识别转换，
   并把坐标按 0.5 缩放对齐 SPC 卡面图集（SPC 图集是半分辨率）。
@@ -166,9 +166,8 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
   - SPC{卡id}.atlas（图集，自动从 .atlas.asset 复制一份）
   - SPC{卡id}.png（自带 alpha 的贴图）
 - Spine 3.8.75 编辑器：打开 SPSprachen_s_v38.json + SPC{卡id}.atlas + SPC{卡id}.png，
-  内置 10 个动画（anime_0000_000 ~ anime_0001_004），主菜单 4 可浏览器预览。
-- 注意：共享骨架只含正面皮肤（front_to_left/front_to_right），
-  背面皮肤（back_*）是游戏客户端另一套机制，不在下载资源里。
+  内置 10 个情人节动画（anime_0000_000 ~ anime_0001_004），主菜单 4 可浏览器预览。
+- 注意：共享骨架只含正面皮肤（front_to_left/front_to_right）
 
 ## 版本历史
 
@@ -177,14 +176,16 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 -> 1.4 -> 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x -> 2.0
 
+### v1.31（2025-8-11）
+- **spine预览增加对老卡骨架选择提示**
+
 ### v1.3（2026-08-10）
 - **小人（SPC）朝向修复**：小人骨架用 flip 骨骼左右镜像（scaleX=-1），
   角色朝右走、朝右看，方向一致（之前动画向右走但角色左视，看起来像倒退）
 - 导出 MP4 同步应用该镜像
 - **预览加载防呆**：
-  - 骨架栏误选图集/贴图等非骨架文件时直接报错并拒绝加载，不再乱解析
+  - 骨架栏误选图集/贴图等非骨架文件时直接报错并拒绝加载
   - 图集引用的贴图不在已选贴图里时，明确提示"图集和贴图不配套"，
-    不再静默拿第一张贴图渲染成"随机扒块"
 - 小人正确文件组合：骨架 SPSprachen_s.json + 图集 SPC{id}.atlas(.asset) + 贴图 SPC{id}.png
 
 ### v1.2（2026-08-10）
