@@ -18,7 +18,8 @@ target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)
 
 # 独立的资源清单更新检查工具（check_update.exe）
 add_executable(check_update
-    check_update.c)
+    check_update.c
+    sqlite3.c)
 target_link_libraries(check_update winhttp)
 target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
 
