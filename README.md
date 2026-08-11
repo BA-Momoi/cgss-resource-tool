@@ -10,12 +10,12 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源整合工具：傻瓜�
 ### 待完善
 1. **数据表查找数据**：从 master.mdb 查 3D 模型 / 2D Spine / 歌曲 / 歌曲动作 / 谱面 / 卡面 / 角色语言 / 3D 舞台的资源文件名和 hash
 2. **数据下载并解析**：
-- 按卡片 id 下载（卡面 6 尺寸 / 背景 / 卡面Spina动画 / 3D 照片 / 语音 / Spine / 3D 模型 / 台词）
+- 按卡片 id 下载（卡面 6 尺寸 / 背景 / 卡面Spina动画 / 3D 照片 / 语音 / Spine / 3D 模型 / 台词 / 贴纸）
    - 按歌曲 id 下载（音频 acb / 封面 / 动作 / 谱面 / 舞台 / 导演包）
    - 按角色 chara_id 批量下载（列出该角色全部卡，多选或全选，资源类型一次选择）
 3. **解包**：
    - 模型解包为 FBX（调用 AssetStudio.CLI）
-   - 角色资源解包（卡面 / 背景 / 卡面Spina动画 / 3d照片 / spine → png / 数据文件）
+   - 角色资源解包（卡面 / 背景 / 卡面Spina动画 / 3d照片 / spine → png / 数据文件 / 贴纸）
      - 卡面Spina动画（live2d）解出的文件单独放在 角色目录\卡面Spina动画\spine\ 子文件夹
      - 自动把 .skel 转成两份 json：*.json（3.6，浏览器预览用）+ *_v38.json（3.8.75，编辑器用）
    - ACB 音乐提取和 HCA 解码（acb2wavs）
@@ -151,7 +151,7 @@ GitHub Releases 里提供编译好的完整工具包（zip）：
 
 - `CGSS_Script.exe` + 依赖（AssetStudio / acb2wavs / Blender 脚本 / 2026.8.2的manifest.db&master.mdb）
 - `*_nodb.zip` 为没有manifest.db&master.db版本
-下载后解压，把数据库放进同一目录，双击 `CGSS_Script.exe` 即可使用。
+下载后解压，把自己提取的数据库放进同一目录，双击 `CGSS_Script.exe` 即可使用。
 
 ## Spine 小人（SPC，card_spine）说明
 
