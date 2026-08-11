@@ -40,3 +40,6 @@ Thumbs.db
 
 # 本地文档（master_mdb 手册 / cysp 说明等，不随发布上传）
 docs/
+cysp_convert.c
+cysp_convert.h
+master.mdb-journal
