@@ -81,7 +81,7 @@ int parse_multi(const char *line, int *sel, int max){
             if (v > 0 && v <= max && n < 64) sel[n++] = v;
         } else p++;
     }
-
+    if(n == 0) fprintf(stderr,"输入无效\n");
     return n;
 }
 
