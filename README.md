@@ -177,7 +177,7 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 
 - 数据库：从游戏客户端提取的 `master.mdb`（主库）和 `manifest_10133800.db`（资源清单）。
   完整发布包已包含
-- 模型解包：AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
+- 模型解包：RazTools的魔改AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
 - 语音解码：deretore-toolkit 的 `acb2wavs.exe` 及同目录 DLL
 - Blender 脚本（可选）：
   - `cgss_apply_textures.py`：FBX 在 Blender 里自动贴图 + 糙度 = 1
@@ -282,5 +282,6 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 
 - 资源清单 / 资源服务器结构参考 [mishiro](https://github.com/toyobayashi/mishiro)
 - 模型解包使用 AssetStudio
+https://github.com/RazTools/Studio
 - 音频解码使用 deretore-toolkit（acb2wavs）
 - Spine 预览使用 Spine Runtimes（spine-core / spine-canvas / spine-webgl）
