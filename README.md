@@ -169,10 +169,6 @@ cmake --build build_static --target all -j 8
 cmake -S . -B build -DCGSS_STATIC=OFF
 ```
 
-也可以直接运行 `pack_release.bat`：一键构建静态版并重新打包 release 下的两个 zip。
-
----
-
 ## 依赖说明
 
 - 数据库：从游戏客户端提取的 `master.mdb`（主库）和 `manifest_10133800.db`（资源清单）。
