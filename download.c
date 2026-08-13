@@ -183,7 +183,15 @@ static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char
                 fclose(tf);
                 printf("台词已导出 %d 条 -> 台词\\card_%d_台词.txt\n", nlines, card_id);
             }
+            else{
+                char errbuf[1200];
+                wide_to_utf8(wtxt,errbuf,1200);
+                fprintf(stderr,"创建%s失败\n",wtxt);
+            }
             sqlite3_finalize(cstmt);
+        }
+        else{
+            fprintf(stderr,"数据库查找失败，请确保数据库无被篡改\n");
         }
     }
     download_items(items, n, wfolder);
@@ -614,6 +622,11 @@ static void dl_sticker(sqlite3 *rdb){
     free(items);
 }
 
+/* 杂项菜单，装一些我还没研究透的东西 */
+int dl_other(sqlite3 *db,sqlite3 *rdb){
+    char buf[256];
+}
+
 /* ================== 菜单2主入口 ================== */
 
 
@@ -639,7 +652,7 @@ int dl_main(void){
     }
     char buf[128];
     while (1){
-        printf("下载类型 1.卡片资源\t2.歌曲资源\t3.按角色批量\t4.贴纸动作(310个)\t5.返回\n");
+        printf("下载类型 1.卡片资源\t2.歌曲资源\t3.按角色批量\t4.贴纸动作(310个)\t5.杂项\t6.返回\n");
         if (fgets(buf, sizeof buf, stdin) == NULL) break;
         int opt = atoi(buf);
         switch (opt){
@@ -647,7 +660,8 @@ int dl_main(void){
         case 2: dl_song(db, rdb); break;
         case 3: dl_chara(db, rdb); break;
         case 4: dl_sticker(rdb); break;
-        case 5:
+        case 5: dl_other(db,rdb);break;
+        case 6:
             printf("返回中...\n");
             sqlite3_close(rdb);
             sqlite3_close(db);

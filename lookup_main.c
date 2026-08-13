@@ -41,6 +41,7 @@ int lookup_main(void){
         printf("1.3D模型\t2.2DSpine小人(beta)\t3.歌曲\n");
         printf("4.歌曲动作\t5.谱面\t6.3D舞台\n");
         printf("7.卡面\t8.角色语言（文本/音频）\n");
+        printf("9.BGM(beta)\t10.周年CG\n")；
         printf("0.返回上一级\n");
         if (fgets(buf, sizeof buf, stdin) == NULL) break;   // EOF 退出
         int opt = atoi(buf);
@@ -84,6 +85,12 @@ int lookup_main(void){
             if (-1 == voice_Search(db, rdb)) {
                 fprintf(stderr, "输入错误\n");
             }
+            break;
+        case 9:
+            printf("尚未完成\n");
+            break;
+        case 10:
+            printf("尚未完成\n");
             break;
         case 0:
             printf("返回中...\n");

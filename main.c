@@ -29,36 +29,7 @@ int main(void){
         {"end", NULL}
     };
     char buf[32];
-    while (1) {
-        printf("1.数据表查找数据\n2.数据下载并解析\n3.解包\n4.打开Spine预览(beta)\n5.usm文件解包\n6.自定义搜索并下载\n7.退出\n");
-        if (fgets(buf, sizeof buf, stdin) == NULL) break;   // EOF 退出
-        int opt = atoi(buf);
-        switch (opt) {
-        case 1:
-            lookup_main();
-            break;
-        case 2:
-            dl_main();
-            break;
-        case 3:
-            unpack_main();
-            break;
-        case 4:
-            open_spine_preview();
-            break;
-        case 5:
-            unpack_usm();
-            break;
-        case 6:
-            dl_custom();
-            break;
-        case 7:
-            return 0;
-        default:
-            fprintf(stderr, "输入错误\n");
-            break;
-        }
-    }
+    
     fflush(stdout);    // 先把结果全部输出，再等按键，避免重定向时和 pause 混在一起
     system("pause");   // 双击 exe 时窗口不闪退，按任意键退出
     return 0;

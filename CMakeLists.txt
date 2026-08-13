@@ -27,7 +27,9 @@ if(CGSS_STATIC)
     target_link_options(CGSS_Script PRIVATE -static)
     target_link_options(check_update PRIVATE -static)
 endif()
-
+# usm解包工具
+add_executable(usm usm.c)
+target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
 # 构建后把 spine_preview 网页资源拷到 exe 同目录（主菜单 4 预览用）
 add_custom_command(TARGET CGSS_Script POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
