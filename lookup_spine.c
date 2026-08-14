@@ -107,14 +107,14 @@ static void queryspina_by_chara(sqlite3 *db){
          int chara_id = atoi(buf);
          if (chara_id <= 0) {
             fprintf(stderr, "输入错误\n");
-            continue;
+            break;
         }
         sqlite3_stmt *stmt = NULL;
         if (sqlite3_prepare_v2(db,
                 "SELECT id,name,open_dress_id FROM card_data WHERE chara_id=? ORDER BY id",
                 -1, &stmt, NULL) != SQLITE_OK) {
             fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(db));
-            return;
+            break;
         }
         sqlite3_bind_int(stmt, 1, chara_id);
         int n = 0;
@@ -124,11 +124,14 @@ static void queryspina_by_chara(sqlite3 *db){
                    sqlite3_column_text(stmt, 1),
                    sqlite3_column_int(stmt, 2));
             n++;
+        }
+        sqlite3_finalize(stmt);
+        if (n == 0)
+            fprintf(stderr, "没有找到相关资源\n");
+        else
+            break;
     }
-    sqlite3_finalize(stmt);
-    if (n == 0)
-        fprintf(stderr, "没有找到相关资源\n");
-    }
+    return ;
 }
 
 /* Spina 按服装 dress_id 查询并列出 */

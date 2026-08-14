@@ -145,7 +145,16 @@ static int http_get(const char *url_path, const wchar_t *wsave){
 
 int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
     char url_path[512];
-    const char *cat = strstr(name, ".acb") ? "Sound" : "AssetBundles";
+    /* CDN 路径类别(实测确认):
+     *   .unity3d -> AssetBundles
+     *   .acb     -> Sound
+     *   .usm     -> Movie
+     *   .bdb     -> Generic
+     * 猜错类别会 403 */
+    const char *cat = "AssetBundles";
+    if (strstr(name, ".acb"))      cat = "Sound";
+    else if (strstr(name, ".usm")) cat = "Movie";
+    else if (strstr(name, ".bdb")) cat = "Generic";
     snprintf(url_path, sizeof url_path, "/dl/resources/%s/%.2s/%s", cat, hash, hash);
 
     wchar_t wsave[1024];

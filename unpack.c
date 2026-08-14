@@ -6,6 +6,7 @@
 #include "util.h"
 #include "unpack.h"
 #include "acb.h"
+#include "paper.h"
 
 void wipe_dir(const wchar_t *dir){
     wchar_t pat[1300];
@@ -141,33 +142,21 @@ int copy_dir(const wchar_t *outdir, const wchar_t *sub, const wchar_t *dest, con
 
 
 int unpack_main(void){
-    char buf[128];
+    def menu[]={
+        {"1.动作解析",NULL,0},
+        {"2.表情/镜头",NULL,0},
+        {"3.模型解包为FBX(beta)",unpack_fbx_main,0},
+        {"4.角色资源解包(卡面/背景/卡面Spina动画(beta)/3d照片/spine(beta))",unpack_resources_main,0},
+        {"5.ACB文件解包",acb_main,0},
+        {"6.返回",NULL,0},
+        {"END",NULL,0}
+    };
     while (1){
-        printf("解包类型 1.动作解析\t2.表情/镜头(beta)\t3.模型解包为FBX(beta)\n");
-        printf("        4.角色资源解包(卡面/背景/卡面Spina动画(beta)/3d照片/spine(beta))\t5.ACB音乐提取和HCA解码\t6.返回\n");
-        if (fgets(buf, sizeof buf, stdin) == NULL) return 1;
-        int opt = atoi(buf);
-        switch (opt){
-        case 1:
-        case 2:
-            printf("还没实现\n");
+        int rc = pager_pick("解包",menu,0);
+        if(rc == -1)
+            continue;
+        else if(rc == 5)
             break;
-        case 3:
-            unpack_fbx_main();
-            break;
-        case 4:
-            unpack_resources_main();
-            break;
-        case 5:
-            acb_main();
-            break;
-        case 6:
-            printf("返回中...\n");
-            return 1;
-        default:
-            fprintf(stderr, "输入错误\n");
-            break;
-        }
     }
 }
 

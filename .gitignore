@@ -24,6 +24,7 @@ CGSS_Script.exe
 /x64/
 /x86/
 acb2wavs.exe
+ffmpeg.exe
 *.dll
 
 # 发布包

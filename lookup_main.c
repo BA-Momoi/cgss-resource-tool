@@ -37,71 +37,26 @@ int lookup_main(void){
         return -1;
     }
     char buf[128];
+    dbdef menu[]={
+        {"1.3D模型",td_Search,0},
+        {"2.2DSpine小人(beta)",spina_Search,0},
+        {"3.歌曲",song_Search,0},
+        {"4.歌曲动作",action_Search,0},
+        {"5.铺面",chart_Search,0},
+        {"6.3D舞台",stage_Search,0},
+        {"7.卡面",cardimg_Search,0},
+        {"8.角色语音（加文本）",voice_Search,0},
+        {"9.BGM(beta)",NULL,0},
+        {"10.CG(beta)",NULL,0},
+        {"11.退出",NULL,0},
+        {"END",NULL,0}          /* 哨兵必须有, pager 靠它数有几项 */
+    };
     while (1) {
-        printf("\f");
-        printf("1.3D模型\t2.2DSpine小人(beta)\t3.歌曲\n");
-        printf("4.歌曲动作\t5.谱面\t6.3D舞台\n");
-        printf("7.卡面\t8.角色语言（文本/音频）\n");
-        printf("9.BGM(beta)\t10.周年CG\n");
-        printf("0.返回上一级\n");
-        if (fgets(buf, sizeof buf, stdin) == NULL) break;   // EOF 退出
-        int opt = atoi(buf);
-        switch (opt) {
-        case 1:
-            if (-1 == td_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }   // 内部循环，直到选"4.返回"
+        int rc =pager_picks("搜索",menu,db,rdb,0);
+        if(rc == -1)
+            continue;
+        else if(rc == 10)       /* "11.退出" 是第 10 项(下标从0数) */
             break;
-        case 2:
-            if (-1 == spina_Search(db,rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 3:
-            if (-1 == song_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 7:
-            if (-1 == cardimg_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 4:
-            if (-1 == action_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 5:
-            if (-1 == chart_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 6:
-            if (-1 == stage_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 8:
-            if (-1 == voice_Search(db, rdb)) {
-                fprintf(stderr, "输入错误\n");
-            }
-            break;
-        case 9:
-            printf("尚未完成\n");
-            break;
-        case 10:
-            printf("尚未完成\n");
-            break;
-        case 0:
-            printf("返回中...\n");
-            sqlite3_close(rdb);
-            sqlite3_close(db);
-            return 1;   // 回到 main 初始菜单
-        default:
-            fprintf(stderr, "输入错误或暂未开发\n");
-            break;
-        }
     }
     sqlite3_close(rdb);
     sqlite3_close(db);

@@ -10,7 +10,7 @@
 #include "unpack.h"
 #include "spine_convert.h"
 #include "texture_merge.h"
-
+#include "paper.h"
 #define DB_PATH "master.mdb"
 
 typedef struct {
@@ -199,34 +199,35 @@ static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char
 
 /* 按卡片 id 下载 */
 
-static void dl_card(sqlite3 *db, sqlite3 *rdb){
+static int dl_card(sqlite3 *db, sqlite3 *rdb){
     char buf[64];
     printf("请输入卡片id\n");
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int card_id = atoi(buf);
-    if (card_id <= 0){ fprintf(stderr, "输入错误\n"); return; }
+    if (card_id <= 0){ fprintf(stderr, "输入错误\n"); return -1; }
 
     char cname[128];
     int chara_id = 0, dress_id = 0;
-    if (query_card(db, card_id, cname, sizeof cname, &chara_id, &dress_id) != 0) return;
+    if (query_card(db, card_id, cname, sizeof cname, &chara_id, &dress_id) != 0) return -1;
     printf("%d|%s\n", card_id, cname);
 
     print_card_res_menu();
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int sel[64], nsel = parse_multi(buf, sel, 8);
     if (nsel < 0){ nsel = 8; for (int i = 0; i < 8; i++) sel[i] = i + 1; }
-    if (nsel == 0) return;
+    if (nsel == 0) return -1;
     dl_card_resources(db, rdb, card_id, cname, chara_id, dress_id, sel, nsel);
+    return 0;
 }
 
 /* 按角色 chara_id 批量下载：列出角色所有卡，可多选/a 全部，资源类型只问一次 */
 
-static void dl_chara(sqlite3 *db, sqlite3 *rdb){
+static int dl_chara(sqlite3 *db, sqlite3 *rdb){
     char buf[128];
     printf("请输入角色id（chara_id，输卡id也能自动识别）：\n");
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int chara_id = atoi(buf);
-    if (chara_id <= 0){ fprintf(stderr, "输入错误\n"); return; }
+    if (chara_id <= 0){ fprintf(stderr, "输入错误\n"); return -1; }
 
     /* 自动识别：输入卡id也能用——先看这个数是不是角色id（该角色有没有卡），
        没有的话再当卡id查一次，解析出真正的角色id */
@@ -256,7 +257,7 @@ static void dl_chara(sqlite3 *db, sqlite3 *rdb){
             "SELECT id,name,open_dress_id FROM card_data WHERE chara_id=? ORDER BY id",
             -1, &stmt, NULL) != SQLITE_OK){
         fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(db));
-        return;
+        return -1;
     }
     sqlite3_bind_int(stmt, 1, chara_id);
     int ids[128], ncards = 0;
@@ -268,22 +269,22 @@ static void dl_chara(sqlite3 *db, sqlite3 *rdb){
                sqlite3_column_int(stmt, 2));
     }
     sqlite3_finalize(stmt);
-    if (ncards == 0){ fprintf(stderr, "该角色没有卡片\n"); return; }
+    if (ncards == 0){ fprintf(stderr, "该角色没有卡片\n"); return -1; }
 
     printf("选择要下载的卡（空格/逗号分隔数字，a=全部，0=返回）：");
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int card_sel[128], ncard_sel = parse_multi(buf, card_sel, ncards);
     if (ncard_sel < 0){
         ncard_sel = ncards;
         for (int i = 0; i < ncards; i++) card_sel[i] = i + 1;
     }
-    if (ncard_sel == 0) return;
+    if (ncard_sel == 0) return -1;
 
     print_card_res_menu();
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int sel[64], nsel = parse_multi(buf, sel, 8);
     if (nsel < 0){ nsel = 8; for (int i = 0; i < 8; i++) sel[i] = i + 1; }
-    if (nsel == 0) return;
+    if (nsel == 0) return -1;
 
     for (int s = 0; s < ncard_sel; s++){
         int card_id = ids[card_sel[s] - 1];
@@ -294,30 +295,31 @@ static void dl_chara(sqlite3 *db, sqlite3 *rdb){
         dl_card_resources(db, rdb, card_id, cname, ch, dress, sel, nsel);
     }
     printf("角色批量下载完成\n");
+    return 0;
 }
 
 /* ================== 菜单2：歌曲资源下载 ================== */
 
 
-static void dl_song(sqlite3 *db, sqlite3 *rdb){
+static int dl_song(sqlite3 *db, sqlite3 *rdb){
     char buf[64];
     printf("请输入歌曲id\n");
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int music_id = atoi(buf);
-    if (music_id <= 0){ fprintf(stderr, "输入错误\n"); return; }
+    if (music_id <= 0){ fprintf(stderr, "输入错误\n"); return -1; }
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db,
             "SELECT id,name FROM music_data WHERE id=?",
             -1, &stmt, NULL) != SQLITE_OK){
         fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(db));
-        return;
+        return -1;
     }
     sqlite3_bind_int(stmt, 1, music_id);
     if (sqlite3_step(stmt) != SQLITE_ROW){
         fprintf(stderr, "没有相关歌曲\n");
         sqlite3_finalize(stmt);
-        return;
+        return -1;
     }
     int id = sqlite3_column_int(stmt, 0);
     char sname[128];
@@ -336,10 +338,10 @@ static void dl_song(sqlite3 *db, sqlite3 *rdb){
     printf("可选资源（空格/逗号分隔数字，a=全部，0=开始下载）：\n");
     printf("1.音频(acb)\t2.封面(jacket)\t3.动作\n");
     printf("4.谱面\t5.舞台\t6.导演包(镜头/表情/阵型)\t7.全部\n");
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
+    if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int sel[64], nsel = parse_multi(buf, sel, 7);
     if (nsel < 0){ nsel = 7; for (int i = 0; i < 7; i++) sel[i] = i + 1; }
-    if (nsel == 0) return;
+    if (nsel == 0) return -1;
 
     ResItem items[64];
     int n = 0;
@@ -444,6 +446,7 @@ static void dl_song(sqlite3 *db, sqlite3 *rdb){
         }
     }
     download_items(items, n, wfolder);
+    return 0;
 }
 
 /* ================== 菜单2：贴纸动作(310个) ==================
@@ -452,16 +455,17 @@ static void dl_song(sqlite3 *db, sqlite3 *rdb){
  *   - 原文件unity3d: LZ4 解压后的 unity3d 包
  *   - spine文件\SPMotionSticker_XXXXX: skel + atlas + png（另自动转 json）
  *   - 贴纸PNG: 每张贴纸按 atlas 裁成 _1.png / _2.png 两帧 */
-static void dl_sticker(sqlite3 *rdb){
+static int dl_sticker(sqlite3 *db, sqlite3 *rdb){
+    (void)db;   /* 贴纸只用 rdb, 参数对齐 dbdef 的 func 签名 */
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(rdb,
             "SELECT name,hash FROM manifests WHERE name LIKE 'spine_motion_sticker_%.unity3d' ORDER BY name",
             -1, &stmt, NULL) != SQLITE_OK){
         fprintf(stderr, "查询贴纸清单失败: %s\n", sqlite3_errmsg(rdb));
-        return;
+        return -1;
     }
     ResItem *items = (ResItem*)malloc(sizeof(ResItem) * 512);
-    if (!items){ sqlite3_finalize(stmt); return; }
+    if (!items){ sqlite3_finalize(stmt); return -1; }
     int n = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW && n < 512){
         snprintf(items[n].name, sizeof items[n].name, "%s",
@@ -474,7 +478,7 @@ static void dl_sticker(sqlite3 *rdb){
     if (n == 0){
         printf("清单里没有 spine_motion_sticker 资源\n");
         free(items);
-        return;
+        return -1;
     }
     printf("清单里有 %d 个贴纸动作包，开始下载/解包...\n", n);
 
@@ -620,11 +624,14 @@ static void dl_sticker(sqlite3 *rdb){
     }
     printf("贴纸下载完成：原文件 %d 个，解包 %d 个\n", ndl, nunpack);
     free(items);
+    return 0;
 }
 
 /* 杂项菜单，装一些我还没研究透的东西 */
 int dl_other(sqlite3 *db,sqlite3 *rdb){
-    char buf[256];
+    (void)db; (void)rdb;
+    printf("杂项功能还没写\n");
+    return 0;
 }
 
 /* ================== 菜单2主入口 ================== */
@@ -650,26 +657,21 @@ int dl_main(void){
         sqlite3_close(db);
         return -1;
     }
-    char buf[128];
+    dbdef menu[] = {
+        {"1.卡片资源",dl_card,0},
+        {"2.歌曲资源",dl_song,0},
+        {"3.批量下载",dl_chara,0},
+        {"4.贴纸(310个)",dl_sticker,0},
+        {"5.杂项",dl_other,0},
+        {"6.返回",NULL,0},
+        {"END",NULL,0}
+    };
     while (1){
-        printf("下载类型 1.卡片资源\t2.歌曲资源\t3.按角色批量\t4.贴纸动作(310个)\t5.杂项\t6.返回\n");
-        if (fgets(buf, sizeof buf, stdin) == NULL) break;
-        int opt = atoi(buf);
-        switch (opt){
-        case 1: dl_card(db, rdb); break;
-        case 2: dl_song(db, rdb); break;
-        case 3: dl_chara(db, rdb); break;
-        case 4: dl_sticker(rdb); break;
-        case 5: dl_other(db,rdb);break;
-        case 6:
-            printf("返回中...\n");
-            sqlite3_close(rdb);
-            sqlite3_close(db);
-            return 1;
-        default:
-            fprintf(stderr, "输入错误\n");
-            break;
-        }
+        int rc = pager_picks("下载菜单",menu,db,rdb,0);
+        if(rc == -1)
+            continue;
+        else if(rc == 5)
+            break;        
     }
     sqlite3_close(rdb);
     sqlite3_close(db);

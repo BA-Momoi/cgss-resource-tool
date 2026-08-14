@@ -184,15 +184,12 @@ int cardimg_Search(sqlite3 *db, sqlite3 *rdb){
         case 1:
             querycardimg_by_name(db);
             cardimg_id_menu(db, rdb);
-            break;
         case 2:
             querycardimg_by_chara(db);
             cardimg_id_menu(db, rdb);
-            break;
         case 3:
             querycardimg_by_dress(db);
             cardimg_id_menu(db, rdb);
-            break;
         case 4:
             printf("返回中...\n");
             return 1;   // 告诉 lookup_main 回到一级菜单

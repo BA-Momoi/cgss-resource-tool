@@ -10,6 +10,8 @@ add_executable(CGSS_Script
     download.c net.c acb.c util.c
     unpack.c unpack_fbx.c unpack_res.c
     paper.c
+    browse.c
+    cg.c
     spine_convert.c preview.c texture_merge.cpp
     GBKswapUTF8.c sqlite3.c)
 
@@ -37,3 +39,12 @@ add_custom_command(TARGET CGSS_Script POST_BUILD
         ${CMAKE_SOURCE_DIR}/spine_preview
         $<TARGET_FILE_DIR:CGSS_Script>/spine_preview
     COMMENT "Copying spine_preview assets next to CGSS_Script.exe")
+
+# 工程根目录有 ffmpeg.exe 就一起拷到 exe 旁边（CG/USM 解包转 mp4 用）
+if(EXISTS ${CMAKE_SOURCE_DIR}/ffmpeg.exe)
+    add_custom_command(TARGET CGSS_Script POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/ffmpeg.exe
+            $<TARGET_FILE_DIR:CGSS_Script>/ffmpeg.exe
+        COMMENT "Copying ffmpeg.exe next to CGSS_Script.exe")
+endif()

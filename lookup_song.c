@@ -79,34 +79,39 @@ static void cardsong_id_menu(sqlite3 *db, sqlite3 *rdb){
 /* 按歌名模糊查询并列出 */
 static void querysong_by_name(sqlite3 *db){
     char buf[128];
-    printf("请输入歌曲名：\n");
-    if (fgets(buf, sizeof buf, stdin) == NULL) return;
-    buf[strcspn(buf, "\r\n")] = 0;
-    char name_utf8[128];
-    gbk_to_utf8(buf, name_utf8, sizeof name_utf8);
-    char like[256];
-    snprintf(like, sizeof like, "%%%s%%", name_utf8);
+    while(1){
+        printf("请输入歌曲名：\n");
+        if (fgets(buf, sizeof buf, stdin) == NULL) return;
+        buf[strcspn(buf, "\r\n")] = 0;
+        char name_utf8[128];
+        gbk_to_utf8(buf, name_utf8, sizeof name_utf8);
+        char like[256];
+        snprintf(like, sizeof like, "%%%s%%", name_utf8);
 
-    sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(db,
-            "SELECT id,name,bpm,composer FROM music_data WHERE name LIKE ? ORDER BY id",
-            -1, &stmt, NULL) != SQLITE_OK) {
-        fprintf(stderr, "SQL错误:%s\n", sqlite3_errmsg(db));
-        return;
+        sqlite3_stmt *stmt = NULL;
+        if (sqlite3_prepare_v2(db,
+                "SELECT id,name,bpm,composer FROM music_data WHERE name LIKE ? ORDER BY id",
+                -1, &stmt, NULL) != SQLITE_OK) {
+            fprintf(stderr, "SQL错误:%s\n", sqlite3_errmsg(db));
+            return;
+        }
+        sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
+        int n = 0;
+        while (sqlite3_step(stmt) == SQLITE_ROW) {
+            printf("| id = %d | name = %s | BPM = %d | 作曲 = %s |\n",
+                   sqlite3_column_int(stmt, 0),
+                   sqlite3_column_text(stmt, 1),
+                   sqlite3_column_int(stmt, 2),
+                   sqlite3_column_text(stmt, 3));
+            n++;
+        }
+        sqlite3_finalize(stmt);
+        if (n == 0)
+            fprintf(stderr, "没有找到相关歌曲\n");
+        else{
+            break;
+        }
     }
-    sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
-    int n = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW) {
-        printf("| id = %d | name = %s | BPM = %d | 作曲 = %s |\n",
-               sqlite3_column_int(stmt, 0),
-               sqlite3_column_text(stmt, 1),
-               sqlite3_column_int(stmt, 2),
-               sqlite3_column_text(stmt, 3));
-        n++;
-    }
-    sqlite3_finalize(stmt);
-    if (n == 0)
-        fprintf(stderr, "没有找到相关歌曲\n");
 }
 
 /* 歌曲查询菜单：选完一项自动回到本菜单，选 3 返回一级菜单 */
