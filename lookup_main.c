@@ -10,6 +10,7 @@
 #include "lookup_table.h"
 #include "GBKswapUTF8.h"
 #include "util.h"
+#include "paper.h"
 
 #define DB_PATH "master.mdb"
 
@@ -41,7 +42,7 @@ int lookup_main(void){
         printf("1.3D模型\t2.2DSpine小人(beta)\t3.歌曲\n");
         printf("4.歌曲动作\t5.谱面\t6.3D舞台\n");
         printf("7.卡面\t8.角色语言（文本/音频）\n");
-        printf("9.BGM(beta)\t10.周年CG\n")；
+        printf("9.BGM(beta)\t10.周年CG\n");
         printf("0.返回上一级\n");
         if (fgets(buf, sizeof buf, stdin) == NULL) break;   // EOF 退出
         int opt = atoi(buf);

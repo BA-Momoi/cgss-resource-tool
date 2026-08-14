@@ -50,7 +50,7 @@ int pager_pick(const char *title, def *Def,int multi){
             printf("%s   [第%d页/%d页] 已选%d ↑↓选择  Space勾选  A全选/全不选  PgUp/PgDn翻页  Enter确认  Esc取消\n\n",title,pager + 1,total_pages,n_state);
         }
         else{
-            printf("%s   [第%d页/%d页] ↑↓选择  Space勾选  PgUp/PgDn翻页  Enter确认  Esc取消\n\n",title,pager + 1,total_pages);
+            printf("%s   [第%d页/%d页] ↑↓选择  PgUp/PgDn翻页  Enter确认  Esc取消\n\n",title,pager + 1,total_pages);
         }
         for(int i = ps;i <= pe;i++){
             if(multi){
@@ -82,7 +82,7 @@ int pager_pick(const char *title, def *Def,int multi){
             case 0x4F:sel = count -1;break;
             }
         }
-        else if(k == ' ' || k == 'A' || k == 'a'){
+        else if(multi && (k == ' ' || k == 'A' || k == 'a')){
             if(k == ' '){
                 Def[sel].state = !Def[sel].state;
                 n_state += Def[sel].state ? 1:-1;
@@ -119,7 +119,13 @@ int pager_pick(const char *title, def *Def,int multi){
         for(int i = 0;i < count;i++){
             Def[i].state = 0;
         }
+        return -1;             /* Esc: 清完勾选直接返回取消, 别往下走 */
     }
-    if(!multi) return sel;
+    if(!multi){
+        if(Def[sel].func != NULL){
+            Def[sel].func();
+        }
+        return sel;
+    }
     return n_state;
 }
