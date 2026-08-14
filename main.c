@@ -11,12 +11,12 @@ int main(void){
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);   // 强制 UTF-8 控制台，输入输出统一
     def menu[] = {
-        {"1.数据表查找数据", lookup_main,0},
-        {"2.数据下载并解析", dl_main,0},
-        {"3.解包", unpack_main,0},
-        {"4.打开Spine预览(beta)", open_spine_preview,0},
-        {"5.usm文件解包", unpack_usm,0},
-        {"6.自定义搜索并下载", dl_custom,0},
+        {"1.数据表查找数据", lookup_main(),0},
+        {"2.数据下载并解析", dl_main(),0},
+        {"3.解包", unpack_main(),0},
+        {"4.打开Spine预览(beta)", open_spine_preview(),0},
+        {"5.usm文件解包", unpack_usm(),0},
+        {"6.自定义搜索并下载", dl_custom(),0},
         {"7.退出", NULL,0},
         {"end", NULL,0}
     };
