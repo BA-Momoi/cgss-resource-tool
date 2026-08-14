@@ -5,13 +5,6 @@
 #include<conio.h>
 #include"paper.h"
 
-typedef struct TypeDef
-{
-    char name[128];
-    void (*func)(void);
-    int state;
-}def;
-
 
 static HANDLE hOut;
 
