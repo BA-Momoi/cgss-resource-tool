@@ -17,31 +17,22 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 主菜单：
 
 ```
-1. 数据表查找数据
-2. 数据下载并解析
-3. 解包
-4. 打开 Spine 预览(beta)
+ ~~数据表查找数据~~
+ ~~数据下载并解析~~
+ (v1.5后合并)
+1. 资源查找与下载
+2. 解包
+3. 打开 Spine 预览(beta)
+4. USM/CG解包
 ```
 
-### 1. 数据表查找
+### 1. 资源查找与下载
+- 支持CG/2DMV/3D模型/2D小人(Spine模型)/歌曲/谱面/卡面图片/动态卡面(Spine动画)
+  角色语言&文本/3D舞台/3DMV角色动作/游戏插画贴纸/BGM 的下载
+- 支持在下载完成后选择是否解包，减少繁琐操作
+![USM文件下载显示](GIF/查找MV.gif)
 
-在 `master.mdb` 中按需查询资源名与 hash，支持：
-
-- 3D 模型（自动优先 HQ 版本）
-- 2D Spine 小人（新卡 s 骨架 / 老卡 n 骨架）
-- 歌曲信息（含已下架歌曲的全部条目）
-- 歌曲动作、谱面、3D 舞台
-- 卡面（circle / sm / s / m / l / xl 六种尺寸、背景、Live2D、3D 照片）
-- 角色语言（文本 / 音频）
-
-### 2. 数据下载并解析
-
-- 卡片资源：卡面、背景、Live2D、3D 照片、语音、Spine 小人、3D 模型、台词、贴纸动作
-- 歌曲资源：音频（acb）、封面、动作、谱面、舞台、导演包
-- 按角色批量下载：列出该角色全部卡片，支持多选 / 全选
-- 下载时自动做 LZ4 解压，已下载的文件可跳过（断点续跑）
-
-### 3. 解包
+### 2. 解包
 
 - 模型解包为 FBX（调用 AssetStudio.CLI；CLI 导出身体贴图会无法自动引用）
 - 卡面 / 背景 / Live2D / 3D 照片 / Spine 解包为 PNG
@@ -51,7 +42,7 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 - RGB 主贴图 + A8 透明通道自动合成 `*_merged.png`，并生成配套 atlas
 - ACB 音乐提取与 HCA 解码（acb2wavs）
 
-### 4. Spine 预览（beta）
+### 3. Spine 预览（beta）
 
 扫描 `CGSS_DOWN` 里带 Spine（Live2D）资源的角色，自动补转缺失的 JSON，
 用默认浏览器打开 `spine_preview/preview.html` 即可播放动画。
@@ -63,6 +54,11 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 - 支持左右镜像（flip），新卡 s / 老卡 n 骨架加载前自动提示
 - 页面提供「导出 MP4」按钮：WebCodecs 硬编码 H.264，30fps，
   以背景包围盒为输出尺寸（需新版 Chrome / Edge）
+
+  ### 4.USM/CG解包
+
+- 支持自定义USM文件解包（但默认密钥为草菇的密钥，需要自行usm.c更改密钥）
+- 
 
 ---
 
@@ -110,36 +106,32 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 
 ```
 CGSS/
-├── main.c                     主菜单入口（1.查询 2.下载 3.解包 4.Spine预览）
-├── check_update.c             资源清单检查 / 下载工具（check_update.exe）
-├── lookup_common.c / .h       查询公共函数（hash 打印）
-├── lookup_3d.c                3D 模型查询
-├── lookup_spine.c             2D Spine 小人查询
-├── lookup_song.c              歌曲查询
-├── lookup_action.c            歌曲动作查询
-├── lookup_chart.c             谱面查询
-├── lookup_card.c              卡面查询
-├── lookup_voice.c             角色语言查询
-├── lookup_stage.c             3D 舞台查询
-├── lookup_main.c              查询主菜单
-├── lookup_table.h             查询模块公共声明
-├── data.h                     数据结构定义（卡面/角色等）
-├── download.c / .h            数据下载（卡片/歌曲/按角色批量）
-├── net.c / .h                 网络下载 + LZ4 解压
-├── acb.c / .h                 ACB 音乐提取和 HCA 解码
+├── main.c                     主菜单入口（1.资源查找与下载 2.解包 3.Spine预览 4.USM/CG解包）
+├── browse.c / .h              资源查找+下载整合模块（自由搜索 / BGM / 歌曲 / 卡片 /
+│                               谱面 / 舞台 / 动作 / 3D模型 / Spine / 贴纸 / CG影片）
+├── cg.c / .h                  USM/CG 解包（自定义文件/目录解包、已下载CG解包、
+│                               视频+配对音频自动合成 mp4）
+├── paper.c / .h               翻页菜单组件（pager：单选/多选、方向键翻页、全屏列表）
+├── usm.c                      独立 USM 解包命令行工具（usm.exe）
+├── lookup_*.c / lookup_table.h  旧查询模块（已被 browse 整合，保留作参考）
+├── download.c / .h            旧下载模块（已被 browse 整合，保留作参考）
+├── net.c / .h                 网络下载（CDN 按扩展名分类：unity3d/acb/usm/bdb）+ LZ4 解压
+├── acb.c / .h                 ACB 音乐提取和 HCA 解码（acb2wavs）
 ├── unpack.c / .h              解包菜单 + 公共解包工具
 ├── unpack_fbx.c               模型解包为 FBX
 ├── unpack_res.c               角色资源解包
 ├── spine_convert.c / .h       Spine .skel -> JSON 转换（CGSS 大端格式）
 ├── texture_merge.cpp / .h     RGB + A8 贴图合成
 ├── preview.c / .h             Spine 浏览器预览
-├── util.c / .h                公共工具
+├── util.c / .h                公共工具（目录创建 / 编码转换 / 多选解析等）
 ├── GBKswapUTF8.c / .h         编码转换
+├── data.h                     数据结构定义（卡面/角色等）
 ├── sqlite3.c / sqlite3.h / sqlite3ext.h   SQLite 库
 ├── spine_preview/             Spine 预览网页资源
-├── cgss_apply_textures.py       Blender 贴图脚本
-├── cgss_anim_to_shapekeys.py    Blender 形态键脚本
+├── cgss_apply_textures.py      Blender 贴图脚本
+├── cgss_anim_to_shapekeys.py   Blender 形态键脚本
 ├── CMakeLists.txt              构建配置
+├── ffmpeg.exe                  视频转换（第三方，不入库，发布包自带）
 ├── master.mdb / manifest_10133800.db   游戏数据库（不在仓库内，自行准备）
 └── README.md                   本文档
 ```
@@ -178,6 +170,7 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - Blender 脚本（可选）：
   - `cgss_apply_textures.py`：FBX 在 Blender 里自动贴图 + 糙度 = 1
   - `cgss_anim_to_shapekeys.py`：把骨骼表情动作烘焙成形态键
+- `ffmpeg.exe`进行mv的音视频合并
 
 ---
 
@@ -199,6 +192,13 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 小更新（修 bug / 小功能）：版本号 +0.01，如 1.3 → 1.31 → 1.32
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 → 1.4 → 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x → 2.0
+  
+### v1.5(2026-08-15)
+- CLI交互重写，更加美观，更人性化
+- 新增USM文件和BGM查找
+  查找到USM文件是2DMV时附带歌曲名
+- 支持在查找时选择文件并进行下载，USM文件在下载时会一起下载对应音频文件并在解包时进行合并
+- 更多请自行探索
 
 ### v1.42（2026-08-12）
 
