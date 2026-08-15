@@ -583,7 +583,30 @@ static int browse_cg(sqlite3 *db, sqlite3 *rdb){
                     n2++;
                 }
             }
-        } else if (movie[0]){
+        }
+        else if (strncmp(usm_name, "m/live/high/movie", 17) == 0) {
+            /* m/live/high/movie5044.usm 这种没有下划线的情况 */
+            const char *d = usm_name + 17;   /* 跳过 "m/live/high/movie" */
+            char sid[16] = "";
+            int k = 0;
+            while (d[k] && isdigit((unsigned char)d[k]) && k < 14) {
+                sid[k] = d[k];
+                k++;
+            }
+            sid[k] = 0;
+            if (sid[0]) {
+                char cand[512];
+                snprintf(cand, sizeof cand, "l/song_%s.acb", sid);
+                if (get_hash(rdb, cand, hash, 64) == 0 && n2 < 16) {
+                    snprintf(items[n2].name, sizeof items[n2].name, "%s", cand);
+                    snprintf(items[n2].hash, sizeof items[n2].hash, "%s", hash);
+                    snprintf(items[n2].disp, sizeof items[n2].disp, "%s", cand);
+                    wcscpy(items[n2].sub, L"音频");
+                    n2++;
+                }
+            }
+        } 
+        else if (movie[0]){
             /* 兜底: 同 movie id 的所有 acb */
             char mlike[128];
             snprintf(mlike, sizeof mlike, "%%movie_%s%%.acb", movie);
