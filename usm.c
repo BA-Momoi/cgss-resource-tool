@@ -121,7 +121,7 @@ int main(int argc,char *argv[]){
 
     FILE *fp = fopen(infile, "rb");
     if(!fp){
-        fprintf(stderr,"打开%s文件失效\n");
+        fprintf(stderr,"打开%s文件失效\n", infile);
         return 1;
     }
     fseek(fp,0,SEEK_END);
