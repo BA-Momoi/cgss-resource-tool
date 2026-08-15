@@ -483,7 +483,38 @@ static int browse_cg(sqlite3 *db, sqlite3 *rdb){
                          "2drich%s | %s", sid, sname);
             else
                 snprintf(tmp[n].name, sizeof tmp[n].name, "2drich%s", sid);
-        } else {
+        } 
+        /* 针对为数不多真正的2D动画显示对应歌曲 */
+        else if(strncmp(row_name[n], "m/live/high/movie", 17) == 0){
+            const char *d = row_name[n] + 17;
+            char sid[16] = "";
+            int k = 0;
+            while (d[k] && isdigit((unsigned char)d[k]) && k < 14){
+                sid[k] = d[k];
+                k++;
+            }
+            sid[k] = 0;
+            char sname[128] = "";
+            if (sid[0]){
+                sqlite3_stmt *sstmt = NULL;
+                if (sqlite3_prepare_v2(db,
+                        "SELECT name FROM music_data WHERE id=?",
+                        -1, &sstmt, NULL) == SQLITE_OK){
+                    sqlite3_bind_int(sstmt, 1, atoi(sid));
+                    if (sqlite3_step(sstmt) == SQLITE_ROW)
+                        snprintf(sname, sizeof sname, "%s",
+                                 (const char*)sqlite3_column_text(sstmt, 0));
+                    sqlite3_finalize(sstmt);
+                }
+            }
+            if (sname[0])
+                snprintf(tmp[n].name, sizeof tmp[n].name,
+                         "2dmovie%s | %s", sid, sname);
+            else
+                snprintf(tmp[n].name, sizeof tmp[n].name, "2dmovie%s", sid);
+        }
+        
+        else {
             snprintf(tmp[n].name, sizeof tmp[n].name, "%s", row_name[n]);
         }
         tmp[n].func = NULL;
@@ -510,18 +541,33 @@ static int browse_cg(sqlite3 *db, sqlite3 *rdb){
     for (int s = 0; s < np; s++){
         int idx = picked_idx[s];
         const char *usm_name = row_name[idx];
-
+        int is2dmovie = 0;
         /* 提取 movie_XXXX */
         char movie[64] = "";
-        const char *pm = strstr(usm_name, "movie_");
-        if (pm){
-            const char *d = pm + 6;
-            int k = 0;
-            while (d[k] && isdigit((unsigned char)d[k]) && k < 60){
-                movie[k] = d[k];
-                k++;
+        if(strstr(usm_name, "movie_")){
+            const char *pm = strstr(usm_name,"movie_"); 
+            if (pm){
+                const char *d = pm + 6;
+                int k = 0;
+                while (d[k] && isdigit((unsigned char)d[k]) && k < 60){
+                    movie[k] = d[k];
+                    k++;
+                }
+                movie[k] = 0;
             }
-            movie[k] = 0;
+            is2dmovie = 1;
+        }else if(strstr(usm_name,"movie")){
+            const char *pm = strstr(usm_name,"movie"); 
+            if (pm){
+                const char *d = pm + 5;
+                int k = 0;
+                while (d[k] && isdigit((unsigned char)d[k]) && k < 60){
+                    movie[k] = d[k];
+                    k++;
+                }
+                movie[k] = 0;
+            }
+            is2dmovie = 1;
         }
         printf("\n========== %s ==========\n", usm_name);
 
@@ -586,7 +632,10 @@ static int browse_cg(sqlite3 *db, sqlite3 *rdb){
         } else if (movie[0]){
             /* 兜底: 同 movie id 的所有 acb */
             char mlike[128];
-            snprintf(mlike, sizeof mlike, "%%movie_%s%%.acb", movie);
+            if(!is2dmovie)
+                snprintf(mlike, sizeof mlike, "%%movie_%s%%.acb", movie);
+            else
+                snprintf(mlike,sizeof mlike,"%%song_%s%%.acb",movie);
             sqlite3_stmt *mstmt = NULL;
             if (sqlite3_prepare_v2(rdb,
                     "SELECT name,hash FROM manifests WHERE name LIKE ? ORDER BY name",
