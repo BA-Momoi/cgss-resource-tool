@@ -3,7 +3,9 @@
 CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解包一体化工具。
 
 纯 C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不需要安装任何运行库。
-
+> [!IMPORTANT]
+> 需解包相关功能请确保将AS放置在同目录和安装NET7
+> https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/7.0.20/windowsdesktop-runtime-7.0.20-win-x64.exe
 > 游戏相关资源及内容的著作权归 BANDAI NAMCO Entertainment Inc. 所有。
 > 本工具仅用于学习交流，请勿用于商业用途；下载、解包的内容请在 24 小时内删除。
 
@@ -167,6 +169,7 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 
 - 数据库：从游戏客户端提取的 `master.mdb`（主库）和 `manifest_10133800.db`（资源清单）。
   完整发布包已包含
+- NET7环境（可选）
 - 模型解包：RazTools的魔改AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
 - 语音解码：deretore-toolkit 的 `acb2wavs.exe` 及同目录 DLL
 - Blender 脚本（可选）：
