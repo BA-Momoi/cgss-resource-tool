@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <windows.h>
+#include <wchar.h>
 #include "acb.h"
 #include "util.h"
 

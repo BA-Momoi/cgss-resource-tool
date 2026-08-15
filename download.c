@@ -186,7 +186,7 @@ static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char
             else{
                 char errbuf[1200];
                 wide_to_utf8(wtxt,errbuf,1200);
-                fprintf(stderr,"创建%s失败\n",wtxt);
+                fprintf(stderr,"创建%s失败\n",errbuf);
             }
             sqlite3_finalize(cstmt);
         }
