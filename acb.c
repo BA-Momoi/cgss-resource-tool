@@ -159,8 +159,10 @@ int acb_main(void){
                 } else {
                     swprintf(dst, 1200, L"%ls\\%hs_%ls", adir, outname, wfd.cFileName);
                 }
-                if (MoveFileExW(src, dst, MOVEFILE_REPLACE_EXISTING))
-                    printf("  -> 音频\\%ls\n", wcsrchr(dst, L'\\') + 1);
+                if (MoveFileExW(src, dst, MOVEFILE_REPLACE_EXISTING)) {
+                    wchar_t *base = wcsrchr(dst, L'\\');
+                    wprintf(L"  -> 音频\\%ls\n", base ? (base + 1) : dst);
+                }
             } while (FindNextFileW(wh, &wfd));
             FindClose(wh);
         }
