@@ -88,7 +88,7 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
   （完整包已含两个库，运行时会显示「已是最新 / 已存在」）
 > [!IMPORTANT]
 > v1.51版本后check_updata.exe在部分设备可能无法正常运行
-> 在修复之前nodb版将更新和停止上传
+> 在修复之前nodb版将停止上传
 
 用法：把 `check_update.exe` 放到与 `CGSS_Script.exe` 相同目录后双击，
 或在命令行运行 `check_update.exe [目录]`。
