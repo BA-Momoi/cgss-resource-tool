@@ -170,7 +170,7 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 数据库：从游戏客户端提取的 `master.mdb`（主库）和 `manifest_10133800.db`（资源清单）。
   完整发布包已包含
 - NET7环境（可选）
-- 模型解包：RazTools的魔改AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
+- 除USM的解包：RazTools的魔改AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
 - 语音解码：deretore-toolkit 的 `acb2wavs.exe` 及同目录 DLL
 - Blender 脚本（可选）：
   - `cgss_apply_textures.py`：FBX 在 Blender 里自动贴图 + 糙度 = 1
@@ -183,10 +183,11 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 
 - 解包报「启动 AssetStudio.CLI 失败」：安装 .NET 7 Desktop Runtime
 - 语音解码无输出：确认 `acb2wavs.exe` 和同目录 DLL 未被杀毒软件删除
-- 找不到数据库：完整包解压后 `master.mdb`、`manifest_*.db` 与 exe 同目录即可；
+- 找不到数据库：`master.mdb`、`manifest_*.db` 与 exe 同目录即可；
   `_nodb` 版请自行准备数据库，或运行一次 `check_update.exe` 获取清单库
 - CLI 导出的 FBX 身体没有贴图：带贴图的 body_FBX 需用 GUI 导出
   （解包菜单内有详细步骤）
+- 选择解包后没有解出所需文件：确保 exe 同目录包含了AssetStudio
 
 ---
 
@@ -197,6 +198,9 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 小更新（修 bug / 小功能）：版本号 +0.01，如 1.3 → 1.31 → 1.32
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 → 1.4 → 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x → 2.0
+
+### v1.51(2026-8-15)
+- CG选择下载界面的MmovieXXXX.usm格式显示对应歌名，下载时自动选择对应音频
   
 ### v1.5(2026-08-15)
 - CLI交互重写，更加美观，更人性化
