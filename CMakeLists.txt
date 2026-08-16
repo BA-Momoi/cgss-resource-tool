@@ -13,7 +13,8 @@ add_executable(CGSS_Script
     browse.c
     cg.c
     spine_convert.c preview.c texture_merge.cpp
-    GBKswapUTF8.c sqlite3.c)
+    GBKswapUTF8.c sqlite3.c
+    auto_updata.c)
 
 target_link_libraries(CGSS_Script winhttp gdiplus)
 

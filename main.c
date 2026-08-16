@@ -1,4 +1,4 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include "unpack.h"
@@ -6,6 +6,9 @@
 #include "paper.h"
 #include "browse.h"
 #include "cg.h"
+
+#define Version 1.51
+
 
 int main(void){
     SetConsoleCP(CP_UTF8);
