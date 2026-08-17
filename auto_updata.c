@@ -27,13 +27,13 @@ int unzip(const char *zip_path,const char *output_path){
 
     if(!mz_zip_reader_init_file(&zip,zip_path,0)){
         error = mz_zip_get_last_error(&zip);
-        fprintf(stderr,"打开%s失败%s\n",zip_path,mz_zip_get_error_string(error));
+        fprintf(stderr,"打开%s失败%s\n",zip_path,mz_zip_get_error_string(error));   
         return -1;   
     }
 
     mz_uint i,filecount;
 
-    filecount = mz_zip_reader_get_num_files(&zip);
+    filecount = mz_zip_reader_get_num_files(&zip);  //zip内文件数量
 
     for(i = 0;i < filecount;i++){
         char name[1024];
@@ -47,6 +47,7 @@ int unzip(const char *zip_path,const char *output_path){
         mz_zip_reader_extract_to_file(&zip,i,name,0);
 
     }
+    mz_zip_reader_end(&zip);
 }
 
 /* updata的WinHttp初始化 */
@@ -343,5 +344,6 @@ int updata_main(double version){
                 return -1;  //更新失败
         }
     }
+    scanf("%s",NULL);
     return 0;   //无需更新
 }
