@@ -6,15 +6,16 @@
 #include "paper.h"
 #include "browse.h"
 #include "cg.h"
+#include "auto_updata.h"
 
 #define Version 1.51
-
+#define BUILD_VERIANT "db"
 
 int main(void){
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);   // 强制 UTF-8 控制台，输入输出统一
+    updata_main(Version);
     enable_vt();                   // 打开 ANSI 转义(清屏/反色), 否则界面是乱码
-
     /* 查找和下载已整合成一个模块(browse.c), 主菜单只留一个入口 */
     def menu[] = {
         {"1.资源查找与下载", browse_main, 0},
