@@ -3,6 +3,7 @@
 #include <windows.h>
 #include <winhttp.h>
 #include <stdlib.h>
+#include <pathcch.h>
 #include "auto_updata.h"
 #include "net.h"
 
@@ -11,7 +12,7 @@ int DOWNERROR = 0;
 
 typedef struct Version_Num{     //存提取出来的参数
     double version;
-    char *down_url;
+    wchar_t *down_url;
 }Version_num;
 
 static void updata_init(void){
@@ -30,6 +31,46 @@ static void updata_init(void){
     WinHttpSetOption(g_sess, WINHTTP_OPTION_SECURE_PROTOCOLS, &prot, sizeof(prot));
 #endif
 }
+// tag Version_num结构体，wroot存目录的地方，PATH_SIZE wroot的长度，
+static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
+    FILE *zip_file = NULL;
+    BOOL bResults = FALSE;
+    HINTERNET hConnect = NULL,hRequest = NULL;
+    
+    wprintf(L"将下载在%ls...\n",wroot);
+    wchar_t host[256];
+    wchar_t path[2048];
+
+    URL_COMPONENTS url;
+
+    url.lpszHostName = host;
+    url.dwHostNameLength = ARRAYSIZE(host);
+
+    url.lpszUrlPath = path;
+    url.dwUrlPathLength = ARRAYSIZE(path);
+
+    url.dwSchemeLength = (DWORD)-1;
+
+    if(!WinHttpCrackUrl(tag->down_url,0,0,&url)){
+        fprintf(stderr,"WinHttpCrackUrl失败\n");
+        return -1;
+    }
+
+    wprintf("Host:%s\n",host);
+    wprintf("Path:%s\n",path);
+    wprintf("port:%s\n",url.nPort);
+
+    if(g_sess)
+        hConnect = WinHttpConnect(g_sess,host,url.nPort,0);
+    else{
+        fprintf(stderr,"g_sess初始化未完成\n");
+        return -1;
+    }
+    if(hConnect)
+        hRequest = WinHttpOpenRequest(hConnect,L"GET",path,NULL,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE);
+        
+    return 0;
+}
 
 int updata_main(double version){
     printf("请确保自己的网络环境可以正常连接Github\n");
@@ -41,20 +82,23 @@ int updata_main(double version){
     HINTERNET hConnect = NULL,hRequest = NULL;
     BOOL bResults = FALSE;
     Version_num tag = {0};
-    tag.down_url = "https://github.com/BA-Momoi/cgss-resource-tool/releases/latest/download/CGSS_ResourceTool.zip";
+    tag.down_url = L"https://github.com/BA-Momoi/cgss-resource-tool/releases/latest/download/CGSS_ResourceTool.zip";
     DWORD len = 0;       /* 已存字节数 */
     char *tmp = NULL;   //存数据的指针
     updata_init();
     if(g_sess)
         hConnect = WinHttpConnect(g_sess,L"github.com",INTERNET_DEFAULT_HTTPS_PORT,0);
-    else 
+    else{
         fprintf(stderr,"WinHttpOpen%u失败\n",GetLastError());
-
+        return -1;
+    }
     if(hConnect)
         hRequest = WinHttpOpenRequest(hConnect,L"GET",L"/BA-Momoi/cgss-resource-tool/releases.atom",   //访问的虚拟地址
         NULL,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE);
-    else
+    else{
         fprintf(stderr,"WinHttpConnect%u失败\n",GetLastError());
+        return -1;
+    }
     if(hRequest)
         bResults = WinHttpSendRequest(hRequest,WINHTTP_NO_ADDITIONAL_HEADERS,0,
         WINHTTP_NO_REQUEST_DATA,0,0,0);
@@ -138,18 +182,41 @@ int updata_main(double version){
             if(tag.down_url != NULL && tag.version != 0.0){
                 printf("Version:%lf\n",tag.version);
                 printf("Url:%s\n",tag.down_url);
-            }else{
+            }else
                 fprintf(stderr,"获取版本号和链接失败\n");
-            }
         }
-        else{
+        else
             fprintf(stderr,"访问%s后并无有效信息\n","github.com/BA-Momoi/cgss-resource-tool/releases.atom");
-        }
+        
     }
     if(!bResults)
         fprintf(stderr,"ERROR %d has occurred.\n",GetLastError());
-    if(g_sess) WinHttpCloseHandle(g_sess);
-    if(hConnect) WinHttpCloseHandle(hConnect);
-    if(hRequest) WinHttpCloseHandle(hRequest);
-    return 0;
+    if(hRequest) WinHttpCloseHandle(hConnect);
+    if(hConnect) WinHttpCloseHandle(hRequest);
+    
+    wchar_t wroot[MAX_PATH];
+    DWORD len = GetModuleFileNameW(NULL,wroot,MAX_PATH);
+    if(len == 0 || len == MAX_PATH){
+        fprintf(stderr,"路径获取失败\n");
+        return -1;
+    }
+    HRESULT rc = PathCchRemoveFileSpec(wroot,MAX_PATH);
+    if(FAILED(rc)){
+        fprintf(stderr,"执行PathCchRemoveFileSpec函数发生错误\n");
+        return -1;
+    }
+    rc = PathCchRemoveFileSpec(wroot,MAX_PATH);
+    if(FAILED(rc)){
+        fprintf(stderr,"执行PathCchRemoveFileSpec函数发生错误\n");
+        return -1;
+    }
+    int rc = 0;
+    if(version < tag.version){
+        rc = down_file(&tag,wroot,MAX_PATH);
+        if(rc == 0)
+            return 1;   //更新完成，返回1需重启
+        else
+            return -1;  //更新失败
+    }
+    return 0;   //无需更新
 }
