@@ -3,4 +3,5 @@
 
 int updata_main(double );
 
+int unzip(const char*,const char*);
 #endif

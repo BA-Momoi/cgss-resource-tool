@@ -14,9 +14,11 @@ add_executable(CGSS_Script
     cg.c
     spine_convert.c preview.c texture_merge.cpp
     GBKswapUTF8.c sqlite3.c
-    auto_updata.c)
+    auto_updata.c 
+    miniz/miniz.h
+    miniz/miniz.c)
 
-target_link_libraries(CGSS_Script winhttp gdiplus)
+target_link_libraries(CGSS_Script winhttp gdiplus pathcch)
 
 target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)
 
