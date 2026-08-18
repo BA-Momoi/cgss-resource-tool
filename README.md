@@ -9,7 +9,6 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 > 游戏相关资源及内容的著作权归 BANDAI NAMCO Entertainment Inc. 所有。
 > 本工具仅用于学习交流，请勿用于商业用途；下载、解包的内容请在 24 小时内删除。
 
-#### 解包和部分下载功能均为DS_V4编写(磕了)
 ##### 其实傻不傻瓜式我也不知道，我尽量做的简单了
 
 ---
@@ -19,9 +18,6 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 主菜单：
 
 ```
- ~~数据表查找数据~~
- ~~数据下载并解析~~
- (v1.5后合并)
 1. 资源查找与下载
 2. 解包
 3. 打开 Spine 预览(beta)
@@ -72,11 +68,11 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
    - `CGSS_ResourceTool_nodb.zip`：精简版，不含数据库（见下文）
 2. 解压后把 `CGSS_Script.exe`、`master.mdb`、`manifest_*.db` 放在同一目录
 3. 双击 `CGSS_Script.exe` 即可使用
-
+> 请确保你的网络环境可以正常访问github，程序运行会向github获取最新版本号以判断是否更新
 > 游戏已停止更新新内容，数据库即为最终版本（资源版本 10133800），
 > 资源查询与下载不受影响。
 
-### check_update.exe（可选）
+### check_update.exe（暂时弃用）
 
 负责检查 / 补齐数据库的小工具，精简版（_nodb）用户必看：
 
@@ -89,10 +85,6 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 > v1.51版本后check_updata.exe在部分设备可能无法正常运行
 > 在修复之前nodb版将停止上传
 
-用法：把 `check_update.exe` 放到与 `CGSS_Script.exe` 相同目录后双击，
-或在命令行运行 `check_update.exe [目录]`。
-
-`CGSS_ResourceTool_nodb.zip` 解压后先运行一次它，清单库和主库就都齐了。
 
 ---
 
@@ -114,10 +106,13 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 CGSS/
 ├── main.c                     主菜单入口（1.资源查找与下载 2.解包 3.Spine预览 4.USM/CG解包）
 ├── browse.c / .h              资源查找+下载整合模块（自由搜索 / BGM / 歌曲 / 卡片 /
+├── miniz                       解包zip的第三方库
 │                               谱面 / 舞台 / 动作 / 3D模型 / Spine / 贴纸 / CG影片）
 ├── cg.c / .h                  USM/CG 解包（自定义文件/目录解包、已下载CG解包、
 │                               视频+配对音频自动合成 mp4）
+├── check_updata.c              已暂时弃用
 ├── paper.c / .h               翻页菜单组件（pager：单选/多选、方向键翻页、全屏列表）
+├── auto_updata.c / .h          检测版本号并和github上的版本号进行对比，如有新版本可选择自动更新
 ├── usm.c                      独立 USM 解包命令行工具（usm.exe）
 ├── lookup_*.c / lookup_table.h  旧查询模块（已被 browse 整合，保留作参考）
 ├── download.c / .h            旧下载模块（已被 browse 整合，保留作参考）
@@ -156,7 +151,7 @@ cmake --build build_static --target all -j 8
 产物：
 
 - `build_static/CGSS_Script.exe`（主程序）
-- `build_static/check_update.exe`（清单检查工具）
+- `build_static/usm.exe`（usm解包程序）
 
 默认静态链接：libgcc / libstdc++ 已内嵌进 exe，产物只依赖 Windows 系统 DLL，
 不需要安装 MinGW，也不需要附带任何 MinGW DLL。
@@ -172,6 +167,8 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 数据库：从游戏客户端提取的 `master.mdb`（主库）和 `manifest_10133800.db`（资源清单）。
   完整发布包已包含
 - NET7环境（可选）
+- 一个可以良好访问Github的网络环境
+- 第三方库:miniz 
 - 除USM的解包：RazTools的魔改AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
 - 语音解码：deretore-toolkit 的 `acb2wavs.exe` 及同目录 DLL
 - Blender 脚本（可选）：
@@ -184,6 +181,7 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 ## 常见问题
 
 - 解包报「启动 AssetStudio.CLI 失败」：安装 .NET 7 Desktop Runtime
+- 更新失败：确保有权创造新文件夹，能正常访问Github，如果都没用就手动去Release下载并替换吧，有能力顺便提交个issue
 - 语音解码无输出：确认 `acb2wavs.exe` 和同目录 DLL 未被杀毒软件删除
 - 找不到数据库：`master.mdb`、`manifest_*.db` 与 exe 同目录即可；
   `_nodb` 版请自行准备数据库，或运行一次 `check_update.exe` 获取清单库
@@ -200,6 +198,10 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 小更新（修 bug / 小功能）：版本号 +0.01，如 1.3 → 1.31 → 1.32
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 → 1.4 → 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x → 2.0
+
+### v1.6(2026-8-28)
+- 新增自动更新，主程序启动时访问github获取最新版本号，如有新版本，则可以选择自动更新
+- 暂时弃用check_update.exe
 
 ### v1.51(2026-8-15)
 - CG选择下载界面的MmovieXXXX.usm格式显示对应歌名，下载时自动选择对应音频

@@ -1,4 +1,4 @@
-#include <stdio.h>
+﻿#include <stdio.h>
 #include <stdlib.h>
 #include <windows.h>
 #include "unpack.h"
@@ -6,12 +6,28 @@
 #include "paper.h"
 #include "browse.h"
 #include "cg.h"
+#include "auto_updata.h"
+#define Version 1.6
+#define BUILD_VERIANT "db"
 
 int main(void){
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);   // 强制 UTF-8 控制台，输入输出统一
-    enable_vt();                   // 打开 ANSI 转义(清屏/反色), 否则界面是乱码
-
+    enable_vt();
+    int rc = updata_main(Version);
+    if(rc == -1){
+        
+        printf("更新失败，请关闭程序重试\n");
+        fflush(stdout);
+        system("pause");
+    }
+    if(rc == 2){
+    /* 更新脚本已经在后台/新窗口跑起来了,主程序必须立刻退出 */
+    printf("正在更新,程序即将关闭...\n");
+    fflush(stdout);
+    return 0;
+    }
+                       // 打开 ANSI 转义(清屏/反色), 否则界面是乱码
     /* 查找和下载已整合成一个模块(browse.c), 主菜单只留一个入口 */
     def menu[] = {
         {"1.资源查找与下载", browse_main, 0},
