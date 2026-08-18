@@ -17,7 +17,94 @@ typedef struct Version_Num{     //存提取出来的参数
     double version;
     wchar_t down_url[256];
 }Version_num;
+/* 释放更新脚本到磁盘,启动它并让脚本接管后续替换流程
+   wroot: 根目录(exe 上上级)
+   exe_name: 主程序 exe 的文件名(不含路径,比如 L"CGSS_ResourceTool.exe")
+   成功返回0,失败返回-1 */
+static int run_update_script(const wchar_t *wroot, const wchar_t *exe_name)
+{
+    wchar_t bat_path[MAX_PATH];
+    swprintf(bat_path, _countof(bat_path), L"%ls\\update.bat", wroot);
 
+    FILE *f = _wfopen(bat_path, L"wb");
+    if (!f) {
+        fprintf(stderr, "无法创建更新脚本\n");
+        return -1;
+    }
+
+    /* bat 内容,%~1 = 根目录, %~2 = exe文件名, 由调用时传入 */
+    const char *bat_content =
+        "@echo off\r\n"
+        "setlocal enabledelayedexpansion\r\n"
+        "chcp 65001 >nul\r\n"
+        "set \"EXE_NAME=%~2\"\r\n"
+        "set \"ROOT=%~1\"\r\n"
+        "if \"%ROOT:~-1%\"==\"\\\" set \"ROOT=%ROOT:~0,-1%\"\r\n"
+        "set \"TARGET_DIR=%ROOT%\\CGSS_ResourceTool\"\r\n"
+        "set \"SOURCE_DIR=%ROOT%\\updata\\CGSS_ResourceTool\"\r\n"
+        "set \"UPDATE_TMP=%ROOT%\\updata\"\r\n"
+        "set \"ZIP_FILE=%ROOT%\\updata.zip\"\r\n"
+        "set \"KEEP_DIR=CGSS_DOWN\"\r\n"
+        ":WAIT_EXIT\r\n"
+        "tasklist /FI \"IMAGENAME eq %EXE_NAME%\" 2>NUL | find /I \"%EXE_NAME%\" >NUL\r\n"
+        "if \"%ERRORLEVEL%\"==\"0\" (\r\n"
+        "    timeout /t 1 /nobreak >NUL\r\n"
+        "    goto WAIT_EXIT\r\n"
+        ")\r\n"
+        "timeout /t 1 /nobreak >NUL\r\n"
+        "if not exist \"%SOURCE_DIR%\" (\r\n"
+        "    echo 错误: 未找到新版本文件夹 %SOURCE_DIR%\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n"
+        "echo 正在替换程序文件...\r\n"
+        "robocopy \"%SOURCE_DIR%\" \"%TARGET_DIR%\" /MIR /XD \"%KEEP_DIR%\" /NFL /NDL /NJH /NJS /R:3 /W:1\r\n"
+        "if %ERRORLEVEL% GEQ 8 (\r\n"
+        "    echo 替换过程中出现错误, 错误码: %ERRORLEVEL%\r\n"
+        "    pause\r\n"
+        "    exit /b 1\r\n"
+        ")\r\n"
+        "if exist \"%UPDATE_TMP%\" rd /s /q \"%UPDATE_TMP%\"\r\n"
+        "if exist \"%ZIP_FILE%\" del /f /q \"%ZIP_FILE%\"\r\n"
+        "echo 更新完成, 正在重启程序...\r\n"
+        "start \"\" \"%TARGET_DIR%\\%EXE_NAME%\"\r\n"
+        "(goto) 2>nul & del \"%~f0\"\r\n";
+
+    fputs(bat_content, f);
+    fclose(f);
+
+    /* 构造 cmd.exe /c "bat路径" "根目录" "exe名" */
+    wchar_t cmdline[MAX_PATH * 3];
+    swprintf(cmdline, _countof(cmdline),
+             L"cmd.exe /c \"\"%ls\" \"%ls\" \"%ls\"\"",
+             bat_path, wroot, exe_name);
+
+    STARTUPINFOW si;
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&si, sizeof si);
+    ZeroMemory(&pi, sizeof pi);
+    si.cb = sizeof si;
+
+    BOOL ok = CreateProcessW(
+        NULL,           /* 应用程序名, 用命令行里的就行, 传NULL */
+        cmdline,        /* 完整命令行 */
+        NULL, NULL,     /* 安全属性 */
+        FALSE,          /* 不继承句柄 */
+        CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP,  /* 独立新窗口+新进程组 */
+        NULL,           /* 环境变量, 用父进程的 */
+        wroot,          /* 工作目录 */
+        &si, &pi
+    );
+
+    if (!ok) {
+        fprintf(stderr, "启动更新脚本失败, 错误码: %lu\n", GetLastError());
+        return -1;
+    }
+
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+    return 0;
+}
 /* 根据目录一次创建父级 返回1创建完成，返回-1为创建失败 */
 static int make_parent_dirs(const char * file_path){
     char file[MAX_PATH];
@@ -28,9 +115,9 @@ static int make_parent_dirs(const char * file_path){
     for(p = file;*p;p++){
         if(*p == '\\'|| *p == '/'){
             char save = *p;
-            p = '\0';
+            *p = '\0';
 
-            if(*file && !CreateDirectoryA(file,NULL) && GetLastError() != ERROR_ALIAS_EXISTS){
+            if(*file && !CreateDirectoryA(file,NULL) && GetLastError() != ERROR_ALREADY_EXISTS){    //创建文件失败为权限不足才返回错误
                 *p = save;
                 return -1;
             }   
@@ -69,14 +156,10 @@ int unzip(const char *zip_path,const char *output_path){
         mz_zip_reader_get_filename(&zip,i,name,sizeof name);
         printf("解压%s...\n",name);
 
-        if(!mz_zip_reader_extract_to_file(&zip,i,name,0)){
-            results = 0;
-            continue;
-        }
-
         snprintf(dst_path,sizeof dst_path,"%s\\%s",output_path,name);
+        
 
-        for(p = dst_path;p;p++){    //miniz 内部使用的是/，需转换
+        for(p = dst_path;*p;p++){    //miniz 内部使用的是/，需转换
             if(*p == '/')
                 *p = '\\';
         }
@@ -126,8 +209,8 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
     zip_file = _wfopen(zippath,L"wb");
     
     char utf8_wroot[512];
-    wide_to_utf8(wroot,utf8_wroot,_countof(wroot));
-    printf("将下载在%ls...\n",utf8_wroot);
+    wide_to_utf8(wroot,utf8_wroot,PATH_SIZE);
+    printf("将下载在%s...\n",utf8_wroot);
     wchar_t host[256];
     wchar_t path[2048];
 
@@ -144,7 +227,7 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
     url.dwSchemeLength = (DWORD)-1;
 
     if(!WinHttpCrackUrl(tag->down_url,0,0,&url)){
-        fprintf(stderr,"WinHttpCrackUrl失败\n");
+        fprintf(stderr,"WinHttpCrackUrl失败%lu\n",GetLastError());
         return -1;
     }
     char utf8_host[256],utf8_path[2048];
@@ -163,19 +246,19 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
     if(hConnect)
         hRequest = WinHttpOpenRequest(hConnect,L"GET",path,NULL,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE);
     else{
-        fprintf(stderr,"WinHttpConnect%s错误\n",GetLastError());
+        fprintf(stderr,"WinHttpConnect%lu错误\n",GetLastError());
         return -1;
     }
     if(hRequest)
         bResults = WinHttpSendRequest(hRequest,WINHTTP_NO_ADDITIONAL_HEADERS,0,WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     else{
-        fprintf(stderr,"WinHttpOpenRequest%s错误\n",GetLastError());
+        fprintf(stderr,"WinHttpOpenRequest%lu错误\n",GetLastError());
         return -1;
     }
     if(bResults)
         bResults = WinHttpReceiveResponse(hRequest,NULL);
     else{
-        fprintf(stderr,"WinHttpSendRequest%s错误",GetLastError());
+        fprintf(stderr,"WinHttpSendRequest%lu错误",GetLastError());
         return -1;
     }
     int error_count = 0;
@@ -235,14 +318,14 @@ int updata_main(double version){
     if(g_sess)
         hConnect = WinHttpConnect(g_sess,L"github.com",INTERNET_DEFAULT_HTTPS_PORT,0);
     else{
-        fprintf(stderr,"WinHttpOpen%u失败\n",GetLastError());
+        fprintf(stderr,"WinHttpOpen%lu失败\n",GetLastError());
         return -1;
     }
     if(hConnect)
         hRequest = WinHttpOpenRequest(hConnect,L"GET",L"/BA-Momoi/cgss-resource-tool/releases.atom",   //访问的虚拟地址
         NULL,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,WINHTTP_FLAG_SECURE);
     else{
-        fprintf(stderr,"WinHttpConnect%u失败\n",GetLastError());
+        fprintf(stderr,"WinHttpConnect%lu失败\n",GetLastError());
         return -1;
     }
     if(hRequest)
@@ -251,7 +334,7 @@ int updata_main(double version){
     if(bResults)
         bResults = WinHttpReceiveResponse(hRequest,NULL);
     else
-        fprintf(stderr,"WinHttpSendRequest%u失败\n",GetLastError());
+        fprintf(stderr,"WinHttpSendRequest%lu失败\n",GetLastError());
     int error_count = 0;
     if(bResults){
         do{
@@ -361,15 +444,7 @@ int updata_main(double version){
     }
     int hc = 0;
     int zc = 0;
-    /*if(version < tag.version){
-        hc = down_file(&tag,wroot,MAX_PATH);
-        if(hc == 0)
-            return 1;   //更新完成，返回1需重启
-        else
-            return -1;  //更新失败
-    }else{
-        printf("暂无新版本\n");
-    }*/
+
     if(version <= tag.version){
         versiondef choice[] ={
             {version,0},
@@ -378,25 +453,35 @@ int updata_main(double version){
         };
         int sel = pager_pick_version("请选择版本",choice,version,0);
         if(sel == -1 || sel == 0){
-            return 0;
-        }else{
-            hc = down_file(&tag,wroot,MAX_PATH);
-            if(hc == 0){
-                char utf8_wroot[MAX_PATH];
-                wide_to_utf8(wroot,utf8_wroot,MAX_PATH);
-                snprintf(utf8_wroot,sizeof utf8_wroot,"%s\\updata.zip",utf8_wroot);
-                char outpath[MAX_PATH];
-                snprintf(outpath,sizeof outpath,"%s\\updata",utf8_wroot);
-                zc = unzip(utf8_wroot,outpath);
-                
-            }
-            else
-                return -1;  //获取更新失败
+            return 0;   //用户取消或选择保留当前版本
         }
+
+        hc = down_file(&tag,wroot,MAX_PATH);
+        if(hc != 0){
+            return -1;  //下载失败
+        }
+
+        char utf8_wroot[MAX_PATH];
+        char utf8_wroot_file[MAX_PATH];
+        wide_to_utf8(wroot,utf8_wroot,MAX_PATH);
+        snprintf(utf8_wroot_file,sizeof utf8_wroot_file,"%s\\updata.zip",utf8_wroot);
+        char outpath[MAX_PATH];
+        snprintf(outpath,sizeof outpath,"%s\\updata",utf8_wroot);
+        zc = unzip(utf8_wroot_file,outpath);
+
+        if(zc != 1){
+            return -1;  //解压失败
+        }
+        wchar_t exeFullPath[MAX_PATH];
+        GetModuleFileNameW(NULL, exeFullPath, MAX_PATH);
+        wchar_t *exeName = wcsrchr(exeFullPath, L'\\');
+        exeName = exeName ? exeName + 1 : exeFullPath;
+
+        if(run_update_script(wroot, exeName) == 0)
+            return 2;   //脚本已启动,主程序需要立刻退出
+        else
+            return -1;  //脚本启动失败
     }
-    if(hc == 0 && zc == 1)
-        return 1;   //更新完成
-    else
-        return -1;  //更新失败
-    return 0;   //无需更新
+
+    return 0;   //无需更新(当前已是最新版本)
 }

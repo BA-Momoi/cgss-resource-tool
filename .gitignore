@@ -9,6 +9,7 @@ Makefile
 *.obj
 CGSS_Script.exe
 *.bat
+updata.zip
 
 # 游戏数据库（需自行获取，不入库）
 *.mdb
@@ -18,6 +19,7 @@ CGSS_Script.exe
 /CGSS_DOWN/
 /AssetStudio_out/
 /fbx导出对比/
+/updata/
 
 # 第三方二进制（Release 附件提供，不入库）
 /AssetStudio/

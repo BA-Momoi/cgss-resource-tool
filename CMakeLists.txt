@@ -22,20 +22,20 @@ target_link_libraries(CGSS_Script winhttp gdiplus pathcch)
 
 target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)
 
-# 独立的资源清单更新检查工具（check_update.exe）
-add_executable(check_update
-    check_update.c
-    sqlite3.c)
-target_link_libraries(check_update winhttp)
-target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
+# 独立的资源清单更新检查工具（check_update.exe）目前已暂时弃用
+#add_executable(check_update
+#    check_update.c
+#    sqlite3.c)
+#target_link_libraries(check_update winhttp)
+#target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
 
 if(CGSS_STATIC)
     target_link_options(CGSS_Script PRIVATE -static)
-    target_link_options(check_update PRIVATE -static)
+#    target_link_options(check_update PRIVATE -static)
 endif()
 # usm解包工具
 add_executable(usm usm.c)
-target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
+target_compile_options(usm PRIVATE -fexec-charset=UTF-8)
 # 构建后把 spine_preview 网页资源拷到 exe 同目录（主菜单 4 预览用）
 add_custom_command(TARGET CGSS_Script POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_directory
