@@ -23,7 +23,7 @@
 #include "sticker.h"
 
 #define DB_PATH "master.mdb"
-#define MAX_ITEMS 512
+#define MAX_ITEMS 1024
 
 /* 一条可下载资源 */
 typedef struct {
@@ -83,10 +83,20 @@ static int collect(const dbdef *tmp, int n, int *picked){
     return c;
 }
 
-/* 下载一条到 wroot\sub */
+static int is_sticker_resource(const char *name)
+{
+    static const char prefix[] = "spine_motion_sticker_";
+    return name && strncmp(name, prefix, sizeof(prefix) - 1) == 0;
+}
+
+/* 下载一条到 wroot\sub；贴纸下载成功后立即进入统一后处理流程。 */
 static void download_item(const BItem *it, const wchar_t *wroot){
-    if (strncmp(it->name, "spine_motion_sticker_", 21) == 0){
-        wchar_t sticker_root[1300], raw_dir[1300], spine_dir[1300], png_dir[1300];
+    wchar_t wsub[1300];
+
+    if (is_sticker_resource(it->name)) {
+        wchar_t sticker_root[1300], raw_dir[1300];
+        wchar_t spine_dir[1300], png_dir[1300];
+
         swprintf(sticker_root, 1300, L"%ls\\贴纸", wroot);
         swprintf(raw_dir, 1300, L"%ls\\原文件unity3d", sticker_root);
         swprintf(spine_dir, 1300, L"%ls\\spine文件", sticker_root);
@@ -94,12 +104,14 @@ static void download_item(const BItem *it, const wchar_t *wroot){
         mkdirs(raw_dir);
         mkdirs(spine_dir);
         mkdirs(png_dir);
-        printf("下载贴纸 %s ...\n", it->name);
-        if (dl_one(it->name, it->hash, raw_dir) == 0)
+
+        printf("下载 %s ...\n", it->name);
+        if (dl_one(it->name, it->hash, raw_dir) == 0) {
             sticker_unpack_file(it->name, raw_dir, spine_dir, png_dir, 0);
+        }
         return;
     }
-    wchar_t wsub[1300];
+
     swprintf(wsub, 1300, L"%ls\\%ls", wroot, it->sub);
     mkdirs(wsub);
     printf("下载 %s ...\n", it->name);
@@ -200,8 +212,8 @@ static void browse_manifest(sqlite3 *rdb, const char *title,
     int rc = pager_picks(title, tmp, NULL, rdb, 1);
     if (rc <= 0){ if (rc == -1) printf("已取消\n"); return; }
 
-    static int picked[MAX_ITEMS];
-    int c = collect(tmp, n, picked);
+    static int picked[MAX_ITEMS] ;
+    int c = collect(tmp, n, picked);    //返回勾选数量
     wchar_t wroot[1024];
     get_dl_root(wroot, 1024);
     for (int i = 0; i < c; i++)

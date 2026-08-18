@@ -496,12 +496,13 @@ static int dl_sticker(sqlite3 *db, sqlite3 *rdb){
         wchar_t wrawfile[1300];
         swprintf(wrawfile, 1300, L"%ls\\%hs", wraw, items[i].name);
         if (GetFileAttributesW(wrawfile) == INVALID_FILE_ATTRIBUTES){
-            if (dl_one(items[i].name, items[i].hash, wraw) == 0) ndl++;
+            if (dl_one(items[i].name, items[i].hash, wraw) == 0)
+                ndl++;
         } else {
             printf("[%d/%d] %s 已存在\n", i + 1, n, items[i].name);
             ndl++;
         }
-        if (sticker_unpack_file(items[i].name, wraw, wspine, wpng, i) == 0)
+        if (sticker_unpack_file(items[i].name, wraw, wspine, wpng, i))
             nunpack++;
     }
     printf("贴纸下载完成：原文件 %d 个，解包 %d 个\n", ndl, nunpack);
