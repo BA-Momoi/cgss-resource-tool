@@ -18,10 +18,33 @@ typedef struct Version_Num{     //存提取出来的参数
     wchar_t down_url[256];
 }Version_num;
 
-/* zip解包 */
+/* 根据目录一次创建父级 返回1创建完成，返回-1为创建失败 */
+static int make_parent_dirs(const char * file_path){
+    char file[MAX_PATH];
+    char *p;
+    
+    strcpy(file,file_path);
+
+    for(p = file;*p;p++){
+        if(*p == '\\'|| *p == '/'){
+            char save = *p;
+            p = '\0';
+
+            if(*file && !CreateDirectoryA(file,NULL) && GetLastError() != ERROR_ALIAS_EXISTS){
+                *p = save;
+                return -1;
+            }   
+            *p =save;
+        }
+    }
+    return 1;
+}
+
+/* zip解包 完成返回1 打开失败返回-1，解包失败返回0 */
 int unzip(const char *zip_path,const char *output_path){
     mz_zip_archive zip;
     mz_zip_error error;
+    int results = 1;
 
     mz_zip_zero_struct(&zip);
 
@@ -37,6 +60,8 @@ int unzip(const char *zip_path,const char *output_path){
 
     for(i = 0;i < filecount;i++){
         char name[1024];
+        char dst_path[1024];
+        char *p;
 
         if(mz_zip_reader_is_file_a_directory(&zip,i))
             continue;
@@ -44,10 +69,34 @@ int unzip(const char *zip_path,const char *output_path){
         mz_zip_reader_get_filename(&zip,i,name,sizeof name);
         printf("解压%s...\n",name);
 
-        mz_zip_reader_extract_to_file(&zip,i,name,0);
+        if(!mz_zip_reader_extract_to_file(&zip,i,name,0)){
+            results = 0;
+            continue;
+        }
 
+        snprintf(dst_path,sizeof dst_path,"%s\\%s",output_path,name);
+
+        for(p = dst_path;p;p++){    //miniz 内部使用的是/，需转换
+            if(*p == '/')
+                *p = '\\';
+        }
+    
+        if(make_parent_dirs(dst_path) == -1){
+            fprintf(stderr,"创建%s失败\n",dst_path);
+            results = 0;
+            continue;
+        }
+
+        if(!mz_zip_reader_extract_to_file(&zip,i,dst_path,0)){
+            error = mz_zip_get_last_error(&zip);
+            fprintf(stderr,"解压失败:%s %s\n",dst_path,mz_zip_get_error_string(error));
+            results = 0;
+            continue;
+        }
+        printf("解压成功: %s\n", dst_path);
     }
     mz_zip_reader_end(&zip);
+    return results;
 }
 
 /* updata的WinHttp初始化 */
@@ -311,6 +360,7 @@ int updata_main(double version){
         return -1;
     }
     int hc = 0;
+    int zc = 0;
     /*if(version < tag.version){
         hc = down_file(&tag,wroot,MAX_PATH);
         if(hc == 0)
@@ -320,7 +370,7 @@ int updata_main(double version){
     }else{
         printf("暂无新版本\n");
     }*/
-    if(version == tag.version){
+    if(version <= tag.version){
         versiondef choice[] ={
             {version,0},
             {tag.version,0},
@@ -337,13 +387,16 @@ int updata_main(double version){
                 snprintf(utf8_wroot,sizeof utf8_wroot,"%s\\updata.zip",utf8_wroot);
                 char outpath[MAX_PATH];
                 snprintf(outpath,sizeof outpath,"%s\\updata",utf8_wroot);
-                unzip(utf8_wroot,outpath);
-                return 1;   //更新完成，返回1需重启
+                zc = unzip(utf8_wroot,outpath);
+                
             }
             else
-                return -1;  //更新失败
+                return -1;  //获取更新失败
         }
     }
-    scanf("%s",NULL);
+    if(hc == 0 && zc == 1)
+        return 1;   //更新完成
+    else
+        return -1;  //更新失败
     return 0;   //无需更新
 }
