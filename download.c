@@ -7,9 +7,7 @@
 #include "download.h"
 #include "net.h"
 #include "util.h"
-#include "unpack.h"
-#include "spine_convert.h"
-#include "texture_merge.h"
+#include "sticker.h"
 #include "paper.h"
 #define DB_PATH "master.mdb"
 
@@ -493,36 +491,8 @@ static int dl_sticker(sqlite3 *db, sqlite3 *rdb){
     swprintf(wpng, 1300, L"%ls\\贴纸PNG", wroot);
     mkdirs(wpng);
 
-    wchar_t exe[1200];
-    find_assetstudio(exe, 1200);
-    if (!exe[0])
-        printf("警告: 找不到 AssetStudio.CLI.exe，只下载不解包（请把 AssetStudio 放到程序同目录）\n");
-    wchar_t exedir[1024];
-    GetModuleFileNameW(NULL, exedir, 1024);
-    wchar_t *ep = wcsrchr(exedir, L'\\');
-    if (ep) *ep = 0;
-
     int ndl = 0, nunpack = 0;
     for (int i = 0; i < n; i++){
-        char id[256];
-        snprintf(id, sizeof id, "%s", items[i].name);
-        char *dot = strrchr(id, '.');
-        if (dot) *dot = 0;
-        /* 包内资产名是 SPMotionSticker_XXXXX，统一用它命名文件夹和 PNG */
-        const char *pnum = strstr(id, "spine_motion_sticker_");
-        if (pnum){
-            char digits[32] = "";
-            snprintf(digits, sizeof digits, "%s", pnum + strlen("spine_motion_sticker_"));
-            char *bad = digits;
-            while (*bad && *bad >= '0' && *bad <= '9') bad++;
-            *bad = 0;
-            if (digits[0])
-                snprintf(id, sizeof id, "SPMotionSticker_%s", digits);
-        }
-        wchar_t wid[256];
-        utf8_to_wide(id, wid, 256);
-
-        /* 1) 原文件 */
         wchar_t wrawfile[1300];
         swprintf(wrawfile, 1300, L"%ls\\%hs", wraw, items[i].name);
         if (GetFileAttributesW(wrawfile) == INVALID_FILE_ATTRIBUTES){
@@ -531,96 +501,8 @@ static int dl_sticker(sqlite3 *db, sqlite3 *rdb){
             printf("[%d/%d] %s 已存在\n", i + 1, n, items[i].name);
             ndl++;
         }
-        if (!exe[0]) continue;
-
-        /* 2) spine 文件 */
-        wchar_t wsub[1300], wmark[1300], wp1[1300];
-        swprintf(wsub, 1300, L"%ls\\%ls", wspine, wid);
-        mkdirs(wsub);
-        swprintf(wmark, 1300, L"%ls\\done.txt", wsub);
-        swprintf(wp1, 1300, L"%ls\\%hs_1.png", wpng, id);
-        if (GetFileAttributesW(wmark) != INVALID_FILE_ATTRIBUTES &&
-            GetFileAttributesW(wp1) != INVALID_FILE_ATTRIBUTES)
-            continue;
-
-        wchar_t outdir[1200];
-        swprintf(outdir, 1200, L"%ls\\AssetStudio_out\\st%03d", exedir, i);
-        wipe_dir(outdir);
-        mkdirs(outdir);
-        wchar_t cmd[3000];
-        swprintf(cmd, 3000, L"\"%ls\" \"%ls\" \"%ls\" --game Normal", exe, wrawfile, outdir);
-        printf("[%d/%d] 解包 %s ...\n", i + 1, n, items[i].name);
-        STARTUPINFOW si;
-        PROCESS_INFORMATION pi;
-        memset(&si, 0, sizeof si); si.cb = sizeof si;
-        memset(&pi, 0, sizeof pi);
-        if (!CreateProcessW(NULL, cmd, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)){
-            printf("  启动 AssetStudio.CLI 失败 err=%lu\n", (unsigned long)GetLastError());
-            continue;
-        }
-        WaitForSingleObject(pi.hProcess, INFINITE);
-        CloseHandle(pi.hThread);
-        CloseHandle(pi.hProcess);
-
-        copy_dir(outdir, L"TextAsset", wsub, L"*.skel*");
-        copy_dir(outdir, L"TextAsset", wsub, L"*.atlas*");
-        copy_dir(outdir, L"Texture2D", wsub, L"*.png");
-
-        /* 3) skel -> json（贴纸自带 500x500 图，scale=1） */
-        wchar_t spt[1300];
-        swprintf(spt, 1300, L"%ls\\*.skel*", wsub);
-        WIN32_FIND_DATAW sfd;
-        HANDLE sh = FindFirstFileW(spt, &sfd);
-        if (sh != INVALID_HANDLE_VALUE){
-            wchar_t ssrc[1300], sj[1300];
-            swprintf(ssrc, 1300, L"%ls\\%ls", wsub, sfd.cFileName);
-            wcscpy(sj, ssrc);
-            size_t sl = wcslen(sj);
-            if (sl > 11 && _wcsicmp(sj + sl - 11, L".skel.asset") == 0)
-                wcscpy(sj + sl - 11, L".json");
-            else if (sl > 5 && _wcsicmp(sj + sl - 5, L".skel") == 0)
-                wcscpy(sj + sl - 5, L".json");
-            int ok36 = (convert_skel21_to_json_w(ssrc, sj, 1.0f) == 0);
-            wchar_t sjv38[1300];
-            wcscpy(sjv38, sj);
-            size_t sl2 = wcslen(sjv38);
-            if (sl2 > 5 && _wcsicmp(sjv38 + sl2 - 5, L".json") == 0){
-                wcscpy(sjv38 + sl2 - 5, L"_v38.json");
-            }
-            int ok38 = (convert_skel21_to_json_v38_w(ssrc, sjv38, 1.0f) == 0);
-            printf("  -> %ls%s\n",
-                   wcsrchr(sj, L'\\') ? wcsrchr(sj, L'\\') + 1 : sj,
-                   ok36 && ok38 ? " + _v38.json" : (ok36 ? "（3.8 失败）" : "（转换失败）"));
-            FindClose(sh);
-        }
-
-        /* 4) atlas 裁剪成两帧 PNG */
-        wchar_t apat[1300], atlas[1300] = L"";
-        swprintf(apat, 1300, L"%ls\\*.atlas*", wsub);
-        WIN32_FIND_DATAW afd;
-        HANDLE ah = FindFirstFileW(apat, &afd);
-        if (ah != INVALID_HANDLE_VALUE){
-            swprintf(atlas, 1300, L"%ls\\%ls", wsub, afd.cFileName);
-            FindClose(ah);
-        }
-        wchar_t ppat[1300], png[1300] = L"";
-        swprintf(ppat, 1300, L"%ls\\*.png", wsub);
-        WIN32_FIND_DATAW pfd;
-        HANDLE ph = FindFirstFileW(ppat, &pfd);
-        if (ph != INVALID_HANDLE_VALUE){
-            swprintf(png, 1300, L"%ls\\%ls", wsub, pfd.cFileName);
-            FindClose(ph);
-        }
-        if (atlas[0] && png[0]){
-            int cn = crop_atlas_regions(atlas, png, wpng, wid);
-            printf("  -> 贴纸PNG\\%ls_1.png / _2.png（%d 帧）\n", wid, cn);
-        } else {
-            printf("  没找到 atlas/png，跳过裁剪\n");
-        }
-
-        FILE *mf = _wfopen(wmark, L"wb");
-        if (mf){ fputs("done", mf); fclose(mf); }
-        nunpack++;
+        if (sticker_unpack_file(items[i].name, wraw, wspine, wpng, i) == 0)
+            nunpack++;
     }
     printf("贴纸下载完成：原文件 %d 个，解包 %d 个\n", ndl, nunpack);
     free(items);
