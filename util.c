@@ -14,8 +14,7 @@ void wide_to_utf8(const wchar_t *in, char *out, int n){
     WideCharToMultiByte(CP_UTF8, 0, in, -1, out, n, NULL, NULL);
 }
 
-/* ??? exe ???? acb2wavs.exe????????????? */
-
+/* 获取当前主程序的完整目录 */
 void get_dl_root(wchar_t *buf, int n){
     GetModuleFileNameW(NULL, buf, n);
     wchar_t *p = wcsrchr(buf, L'\\');
@@ -41,7 +40,6 @@ void mkdirs(const wchar_t *path){
 }
 
 /* 资源名去掉目录部分（l/song_1.acb -> song_1.acb） */
-
 const char *base_name(const char *name){
     const char *p = strrchr(name, '/');
     return p ? p + 1 : name;
