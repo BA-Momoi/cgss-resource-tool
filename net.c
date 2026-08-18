@@ -88,24 +88,24 @@ static int http_get(const char *url_path, const wchar_t *wsave){
     BOOL ok_send = WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
     if (!ok_send){
-        printf("???? err=%lu\n", (unsigned long)GetLastError());
+        printf("SendRequest err=%lu\n", (unsigned long)GetLastError());
     }
     BOOL ok_recv = ok_send && WinHttpReceiveResponse(req, NULL);
     if (ok_send && !ok_recv){
-        printf("???? err=%lu\n", (unsigned long)GetLastError());
+        printf("ReceiveResponse err=%lu\n", (unsigned long)GetLastError());
     }
     if (ok_recv){
         DWORD status = 0, slen = sizeof(status);
         WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX);
         if (status != 200){
-            printf("HTTP??: %lu\n", (unsigned long)status);
+            printf("HTTP err: %lu\n", (unsigned long)status);
         }
         if (status == 200){
             HANDLE f = CreateFileW(wsave, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
                                    FILE_ATTRIBUTE_NORMAL, NULL);
             if (f == INVALID_HANDLE_VALUE){
-                printf("????? err=%lu\n", (unsigned long)GetLastError());
+                printf("CreateFileW err=%lu\n", (unsigned long)GetLastError());
             }
             if (f != INVALID_HANDLE_VALUE){
                 unsigned char buf[131072];
@@ -142,7 +142,6 @@ static int http_get(const char *url_path, const wchar_t *wsave){
 }
 
 /* 下载一个资源并保存到 save_dir，.unity3d 自动 LZ4 解压 */
-
 int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
     char url_path[512];
     /* CDN 路径类别(实测确认):
@@ -181,7 +180,7 @@ int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
         if (cgss_lz4_decompress(raw, (int)sz, &out, &out_len) == 0 && out && out_len > 0){
             FILE *fo = _wfopen(wsave, L"wb");
             if (fo){
-                fwrite(out, 1, out_len, fo);
+                fwrite(out, 1, out_len, fo);    //将out写入fo文件
                 fclose(fo);
                 printf("完成(已LZ4解压 %d -> %d)\n", (int)sz, out_len);
             } else {

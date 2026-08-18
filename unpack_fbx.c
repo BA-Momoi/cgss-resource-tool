@@ -103,7 +103,7 @@ int unpack_fbx_main(void){
     GetModuleFileNameW(NULL, wroot, 1024);
     wchar_t *p = wcsrchr(wroot, L'\\');
     if (p) *p = 0;
-    wcscat(wroot, L"\\CGSS_DOWN");
+    wcscat(wroot, L"\\CGSS_DOWN");  //将wroot改为X:XXX\XXX\CGSS_DOWN
 
     FbxItem items[MAX_FBX_ITEMS];
     int n = 0;
@@ -115,7 +115,7 @@ int unpack_fbx_main(void){
         do {
             if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
             if (fd.cFileName[0] == L'.') continue;
-            char chara_name[256];
+            char chara_name[512];
             wide_to_utf8(fd.cFileName, chara_name, sizeof chara_name);
             wchar_t mdir[1300];
             swprintf(mdir, 1300, L"%ls\\%ls\\3d模型", wroot, fd.cFileName);
