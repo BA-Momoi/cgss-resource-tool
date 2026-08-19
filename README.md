@@ -1,8 +1,8 @@
 # CGSS 资源工具（CGSS Resource Tool）
 
-CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解包一体化工具。
+CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解包一体化工具
 
-纯 C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不需要安装任何运行库。
+C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不需要安装任何运行库
 > [!IMPORTANT]
 > 需解包相关功能请确保将AS放置在同目录和安装NET7
 > https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/7.0.20/windowsdesktop-runtime-7.0.20-win-x64.exe
