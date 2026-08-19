@@ -7,7 +7,7 @@
 #include "browse.h"
 #include "cg.h"
 #include "auto_updata.h"
-#define Version 1.6
+#define Version 1.61
 #define BUILD_VERIANT "db"
 
 int main(void){

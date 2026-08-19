@@ -8,6 +8,7 @@
 #include "auto_updata.h"
 #include "util.h"
 #include "paper.h"
+#include "unpack.h"
 #include "miniz/miniz.h"
 
 static HINTERNET g_sess = NULL;
@@ -17,11 +18,16 @@ typedef struct Version_Num{     //存提取出来的参数
     double version;
     wchar_t down_url[256];
 }Version_num;
-/* 释放更新脚本到磁盘,启动它并让脚本接管后续替换流程
-   wroot: 根目录(exe 上上级)
-   exe_name: 主程序 exe 的文件名(不含路径,比如 L"CGSS_ResourceTool.exe")
+/* 释放更新脚本到磁盘,启动它并让脚本接管后续替换流程。
+   wroot: 临时更新目录的父目录
+   target_dir: 当前 exe 所在目录（实际要替换的目录）
+   exe_name: 主程序 exe 的文件名
+   pid: 当前进程 PID，脚本只等待这个 PID 退出
    成功返回0,失败返回-1 */
-static int run_update_script(const wchar_t *wroot, const wchar_t *exe_name)
+static int run_update_script(const wchar_t *wroot,
+                             const wchar_t *target_dir,
+                             const wchar_t *exe_name,
+                             DWORD pid)
 {
     wchar_t bat_path[MAX_PATH];
     swprintf(bat_path, _countof(bat_path), L"%ls\\update.bat", wroot);
@@ -32,25 +38,27 @@ static int run_update_script(const wchar_t *wroot, const wchar_t *exe_name)
         return -1;
     }
 
-    /* bat 内容,%~1 = 根目录, %~2 = exe文件名, 由调用时传入 */
+    /* bat 内容,%~1 = 根目录, %~2 = 目标目录, %~3 = exe文件名, %~4 = PID */
     const char *bat_content =
         "@echo off\r\n"
         "setlocal enabledelayedexpansion\r\n"
         "chcp 65001 >nul\r\n"
-        "set \"EXE_NAME=%~2\"\r\n"
         "set \"ROOT=%~1\"\r\n"
+        "set \"TARGET_DIR=%~2\"\r\n"
+        "set \"EXE_NAME=%~3\"\r\n"
+        "set \"PARENT_PID=%~4\"\r\n"
         "if \"%ROOT:~-1%\"==\"\\\" set \"ROOT=%ROOT:~0,-1%\"\r\n"
-        "set \"TARGET_DIR=%ROOT%\\CGSS_ResourceTool\"\r\n"
         "set \"SOURCE_DIR=%ROOT%\\updata\\CGSS_ResourceTool\"\r\n"
         "set \"UPDATE_TMP=%ROOT%\\updata\"\r\n"
         "set \"ZIP_FILE=%ROOT%\\updata.zip\"\r\n"
-        "set \"KEEP_DIR=CGSS_DOWN\"\r\n"
         ":WAIT_EXIT\r\n"
-        "tasklist /FI \"IMAGENAME eq %EXE_NAME%\" 2>NUL | find /I \"%EXE_NAME%\" >NUL\r\n"
+        "if not defined PARENT_PID goto AFTER_WAIT\r\n"
+        "tasklist /FI \"PID eq %PARENT_PID%\" /NH 2>NUL | find \"%PARENT_PID%\" >NUL\r\n"
         "if \"%ERRORLEVEL%\"==\"0\" (\r\n"
         "    timeout /t 1 /nobreak >NUL\r\n"
         "    goto WAIT_EXIT\r\n"
         ")\r\n"
+        ":AFTER_WAIT\r\n"
         "timeout /t 1 /nobreak >NUL\r\n"
         "if not exist \"%SOURCE_DIR%\" (\r\n"
         "    echo 错误: 未找到新版本文件夹 %SOURCE_DIR%\r\n"
@@ -58,7 +66,7 @@ static int run_update_script(const wchar_t *wroot, const wchar_t *exe_name)
         "    exit /b 1\r\n"
         ")\r\n"
         "echo 正在替换程序文件...\r\n"
-        "robocopy \"%SOURCE_DIR%\" \"%TARGET_DIR%\" /MIR /XD \"%KEEP_DIR%\" /NFL /NDL /NJH /NJS /R:3 /W:1\r\n"
+        "robocopy \"%SOURCE_DIR%\" \"%TARGET_DIR%\" /E /NFL /NDL /NJH /NJS /R:3 /W:1\r\n"
         "if %ERRORLEVEL% GEQ 8 (\r\n"
         "    echo 替换过程中出现错误, 错误码: %ERRORLEVEL%\r\n"
         "    pause\r\n"
@@ -73,11 +81,11 @@ static int run_update_script(const wchar_t *wroot, const wchar_t *exe_name)
     fputs(bat_content, f);
     fclose(f);
 
-    /* 构造 cmd.exe /c "bat路径" "根目录" "exe名" */
-    wchar_t cmdline[MAX_PATH * 3];
+    /* 构造 cmd.exe /c "bat路径" "根目录" "目标目录" "exe名" "PID" */
+    wchar_t cmdline[MAX_PATH * 5];
     swprintf(cmdline, _countof(cmdline),
-             L"cmd.exe /c \"\"%ls\" \"%ls\" \"%ls\"\"",
-             bat_path, wroot, exe_name);
+             L"cmd.exe /c \"\"%ls\" \"%ls\" \"%ls\" \"%ls\" \"%lu\"\"",
+             bat_path, wroot, target_dir, exe_name, (unsigned long)pid);
 
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
@@ -426,17 +434,21 @@ int updata_main(double version){
     if(hRequest) WinHttpCloseHandle(hRequest);
     if(hConnect) WinHttpCloseHandle(hConnect);
     
-    wchar_t wroot[MAX_PATH];
-    DWORD pathlen = GetModuleFileNameW(NULL,wroot,MAX_PATH);
+    wchar_t exeFullPath[MAX_PATH];
+    DWORD pathlen = GetModuleFileNameW(NULL, exeFullPath, MAX_PATH);
     if(pathlen == 0 || pathlen == MAX_PATH){
         fprintf(stderr,"路径获取失败\n");
         return -1;
     }
-    HRESULT rc = PathCchRemoveFileSpec(wroot,MAX_PATH);
+    wchar_t target_dir[MAX_PATH];
+    wcscpy(target_dir, exeFullPath);
+    HRESULT rc = PathCchRemoveFileSpec(target_dir,MAX_PATH);
     if(FAILED(rc)){
         fprintf(stderr,"执行PathCchRemoveFileSpec函数发生错误\n");
         return -1;
     }
+    wchar_t wroot[MAX_PATH];
+    wcscpy(wroot, target_dir);
     rc = PathCchRemoveFileSpec(wroot,MAX_PATH);
     if(FAILED(rc)){
         fprintf(stderr,"执行PathCchRemoveFileSpec函数发生错误\n");
@@ -445,7 +457,8 @@ int updata_main(double version){
     int hc = 0;
     int zc = 0;
 
-    if(version <= tag.version){
+    /* 同版本不需要再次下载，否则更新后重启会再次进入更新流程。 */
+    if(version < tag.version){
         versiondef choice[] ={
             {version,0},
             {tag.version,0},
@@ -455,6 +468,16 @@ int updata_main(double version){
         if(sel == -1 || sel == 0){
             return 0;   //用户取消或选择保留当前版本
         }
+
+        /* 清理上一次失败留下的半解压目录和旧压缩包，避免混入本次更新。 */
+        wchar_t update_tmp[MAX_PATH], update_zip[MAX_PATH];
+        swprintf(update_tmp, _countof(update_tmp), L"%ls\\updata", wroot);
+        swprintf(update_zip, _countof(update_zip), L"%ls\\updata.zip", wroot);
+        if(GetFileAttributesW(update_tmp) != INVALID_FILE_ATTRIBUTES){
+            wipe_dir(update_tmp);
+            RemoveDirectoryW(update_tmp);
+        }
+        DeleteFileW(update_zip);
 
         hc = down_file(&tag,wroot,MAX_PATH);
         if(hc != 0){
@@ -472,12 +495,17 @@ int updata_main(double version){
         if(zc != 1){
             return -1;  //解压失败
         }
-        wchar_t exeFullPath[MAX_PATH];
-        GetModuleFileNameW(NULL, exeFullPath, MAX_PATH);
+        wchar_t source_dir[MAX_PATH];
+        swprintf(source_dir, _countof(source_dir),
+                 L"%ls\\updata\\CGSS_ResourceTool", wroot);
+        if(GetFileAttributesW(source_dir) == INVALID_FILE_ATTRIBUTES){
+            fprintf(stderr,"更新包中未找到 CGSS_ResourceTool 目录\n");
+            return -1;
+        }
         wchar_t *exeName = wcsrchr(exeFullPath, L'\\');
         exeName = exeName ? exeName + 1 : exeFullPath;
 
-        if(run_update_script(wroot, exeName) == 0)
+        if(run_update_script(wroot, target_dir, exeName, GetCurrentProcessId()) == 0)
             return 2;   //脚本已启动,主程序需要立刻退出
         else
             return -1;  //脚本启动失败

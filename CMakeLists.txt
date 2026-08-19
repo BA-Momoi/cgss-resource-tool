@@ -9,11 +9,13 @@ add_executable(CGSS_Script
     lookup_chart.c lookup_card.c lookup_voice.c lookup_stage.c lookup_main.c
     download.c net.c acb.c util.c
     unpack.c unpack_fbx.c unpack_res.c
+    sticker.c
     paper.c
     browse.c
     cg.c
     spine_convert.c preview.c texture_merge.cpp
     GBKswapUTF8.c sqlite3.c
+    sticker.c
     auto_updata.c 
     miniz/miniz.h
     miniz/miniz.c)

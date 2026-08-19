@@ -1,8 +1,8 @@
 # CGSS 资源工具（CGSS Resource Tool）
 
-CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解包一体化工具。
+CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解包一体化工具
 
-纯 C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不需要安装任何运行库。
+C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不需要安装任何运行库
 > [!IMPORTANT]
 > 需解包相关功能请确保将AS放置在同目录和安装NET7
 > https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/7.0.20/windowsdesktop-runtime-7.0.20-win-x64.exe
@@ -111,6 +111,7 @@ CGSS/
 ├── cg.c / .h                  USM/CG 解包（自定义文件/目录解包、已下载CG解包、
 │                               视频+配对音频自动合成 mp4）
 ├── check_updata.c              已暂时弃用
+├── sticker.c / .h              扩展browse 下载贴图后调用导出spine工程文件和png图片
 ├── paper.c / .h               翻页菜单组件（pager：单选/多选、方向键翻页、全屏列表）
 ├── auto_updata.c / .h          检测版本号并和github上的版本号进行对比，如有新版本可选择自动更新
 ├── usm.c                      独立 USM 解包命令行工具（usm.exe）
@@ -201,9 +202,10 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 → 1.4 → 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x → 2.0
 
-### v1.6(2026-8-28)
+### v1.61(2026-8-28)
 - 新增自动更新，主程序启动时访问github获取最新版本号，如有新版本，则可以选择自动更新
 - 暂时弃用check_update.exe
+- 修复了下载贴图后没有解析文件
 
 ### v1.51(2026-8-15)
 - CG选择下载界面的MmovieXXXX.usm格式显示对应歌名，下载时自动选择对应音频
