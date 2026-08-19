@@ -127,6 +127,7 @@ CGSS/
 ├── util.c / .h                公共工具（目录创建 / 编码转换 / 多选解析等）
 ├── GBKswapUTF8.c / .h         编码转换
 ├── data.h                     数据结构定义（卡面/角色等）
+├── PNG                        记录.md的图片文件夹
 ├── sqlite3.c / sqlite3.h / sqlite3ext.h   SQLite 库
 ├── spine_preview/             Spine 预览网页资源
 ├── cgss_apply_textures.py      Blender 贴图脚本
@@ -134,6 +135,7 @@ CGSS/
 ├── CMakeLists.txt              构建配置
 ├── ffmpeg.exe                  视频转换（第三方，不入库，发布包自带）
 ├── master.mdb / manifest_10133800.db   游戏数据库（不在仓库内，自行准备）
+├── 记录.md                     备忘录差不多
 └── README.md                   本文档
 ```
 
