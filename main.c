@@ -7,12 +7,12 @@
 #include "browse.h"
 #include "cg.h"
 #include "auto_updata.h"
+#include "util.h"
 #define Version 1.61
 #define BUILD_VERIANT "db"
 
 int main(void){
-    SetConsoleCP(CP_UTF8);
-    SetConsoleOutputCP(CP_UTF8);   // 强制 UTF-8 控制台，输入输出统一
+    init_console_utf8();
     enable_vt();
     int rc = updata_main(Version);
     if(rc == -1){

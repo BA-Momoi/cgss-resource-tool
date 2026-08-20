@@ -10,6 +10,7 @@ Makefile
 CGSS_Script.exe
 *.bat
 !pack_release.bat
+!gui/build_gui.bat
 updata.zip
 
 # 游戏数据库（需自行获取，不入库）
@@ -21,6 +22,9 @@ updata.zip
 /AssetStudio_out/
 /fbx导出对比/
 /updata/
+/gui/imgui.ini
+/gui/CGSS_DOWN/
+/gui/AssetStudio_out/
 
 # 第三方二进制（Release 附件提供，不入库）
 /AssetStudio/
@@ -40,7 +44,8 @@ __pycache__/
 # 系统/编辑器
 .DS_Store
 Thumbs.db
-.vscode/
+.vscode/*
+!.vscode/c_cpp_properties.json
 
 # 本地文档（master_mdb 手册 / cysp 说明等，不随发布上传）
 docs/

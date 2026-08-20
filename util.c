@@ -14,6 +14,28 @@ void wide_to_utf8(const wchar_t *in, char *out, int n){
     WideCharToMultiByte(CP_UTF8, 0, in, -1, out, n, NULL, NULL);
 }
 
+const char *wide_to_utf8_tmp(const wchar_t *in){
+    enum { SLOT_COUNT = 8, SLOT_SIZE = 4096 };
+    static char slots[SLOT_COUNT][SLOT_SIZE];
+    static unsigned int next_slot;
+    char *out = slots[next_slot++ % SLOT_COUNT];
+    int written;
+
+    if (!in){
+        out[0] = 0;
+        return out;
+    }
+    written = WideCharToMultiByte(CP_UTF8, 0, in, -1, out, SLOT_SIZE, NULL, NULL);
+    if (written <= 0) out[0] = 0;
+    else out[SLOT_SIZE - 1] = 0;
+    return out;
+}
+
+void init_console_utf8(void){
+    SetConsoleCP(CP_UTF8);
+    SetConsoleOutputCP(CP_UTF8);
+}
+
 /* 获取当前主程序的完整目录 */
 void get_dl_root(wchar_t *buf, int n){
     GetModuleFileNameW(NULL, buf, n);
@@ -31,12 +53,14 @@ void mkdirs(const wchar_t *path){
         if (*p == L'\\'){
             *p = 0;
             if (!CreateDirectoryW(tmp, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
-                printf("????? %ls err=%lu\n", tmp, (unsigned long)GetLastError());
+                printf("创建目录失败: %s err=%lu\n", wide_to_utf8_tmp(tmp),
+                       (unsigned long)GetLastError());
             *p = L'\\';
         }
     }
     if (!CreateDirectoryW(tmp, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
-        printf("????? %ls err=%lu\n", tmp, (unsigned long)GetLastError());
+        printf("创建目录失败: %s err=%lu\n", wide_to_utf8_tmp(tmp),
+               (unsigned long)GetLastError());
 }
 
 /* 资源名去掉目录部分（l/song_1.acb -> song_1.acb） */

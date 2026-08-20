@@ -121,8 +121,8 @@ static int convert_sticker_skel(const wchar_t *spine_sub)
         wcscpy(v38 + len - 5, L"_v38.json");
     ok38 = (convert_skel21_to_json_v38_w(source, v38, 1.0f) == 0);
 
-    printf("  -> %ls%s\n",
-           wcsrchr(json, L'\\') ? wcsrchr(json, L'\\') + 1 : json,
+    printf("  -> %s%s\n",
+           wide_to_utf8_tmp(wcsrchr(json, L'\\') ? wcsrchr(json, L'\\') + 1 : json),
            ok36 && ok38 ? " + _v38.json" :
            (ok36 ? "（3.8 失败）" : "（转换失败）"));
     FindClose(h);
@@ -216,7 +216,8 @@ int sticker_unpack_file(const char *resource_name,
     find_first_file(spine_sub, L"*.png", png, 1300);
     if (atlas[0] && png[0]) {
         int frames = crop_atlas_regions(atlas, png, png_dir, wid);
-        printf("  -> 贴纸PNG\\%ls_1.png / _2.png（%d 帧）\n", wid, frames);
+        printf("  -> 贴纸PNG\\%s_1.png / _2.png（%d 帧）\n",
+               wide_to_utf8_tmp(wid), frames);
     } else {
         printf("  没找到 atlas/png，跳过裁剪\n");
     }

@@ -1,0 +1,36 @@
+CGSS game UI atlas sources
+
+The PNG and OTF files in this directory are third-party game assets and are
+not covered by this repository's MIT license. They are included on this
+feature branch only for a temporary learning demonstration at the repository
+owner's request and should be removed from the public branch within 24 hours.
+This notice does not grant any license to redistribute them.
+
+Manifest: project root / manifest_*.db
+Export tool: project build / AssetStudio / AssetStudio.CLI.exe --game Normal
+
+Full Texture2D exports:
+- Footer.png: atlas_footer.unity3d
+  hash 405f20766dee02b09f4e51b1ae57cbb6, download size 80843 bytes,
+  Texture2D name Footer, 1024x512.
+- HomeSlideButton.png: atlas_homeslidebutton.unity3d
+  hash 8ecfdf454659cdf4aa1c04eba168c09b, download size 96206 bytes,
+  Texture2D name HomeSlideButton, 512x256.
+- Menu.png: atlas_menu.unity3d
+  hash 458641a48b7d0fe590db533c64f9e95b, download size 151647 bytes,
+  Texture2D name Menu, 1024x512.
+- MishiroFooter.png: exact footer sheet used by Mishiro's renderer, extracted
+  from <Mishiro checkout>/resources/asset/img.asar. It is 960x132 and has
+  the original off/on rows, including the Uzuki Idol icon and lower shadow.
+
+Selected navigation slices (x, y, width, height; top-left PNG origin):
+- Home: Footer.png / icon_footer_01_off_04 = (535, 6, 75, 60)
+- Download: HomeSlideButton.png / icon_button_160 = (66, 0, 61, 43)
+- Unpack: Menu.png / icon_button_058 = (463, 397, 52, 49)
+- Spine: HomeSlideButton.png / icon_button_205 = (0, 193, 64, 63)
+- Settings: Menu.png / icon_button_024 = (412, 237, 48, 48)
+
+These bundles use an NGUI UIAtlas. The slice names and rectangles are stored in
+MonoBehaviour/UIAtlas.json as mSprites; they are not Unity Sprite assets, so
+AssetStudio exports no Sprite directory. The PNG files here are untouched full
+Texture2D exports.

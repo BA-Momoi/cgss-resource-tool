@@ -158,7 +158,7 @@ static int pick_and_download(const char *title, sqlite3 *db, sqlite3 *rdb,
     int c = collect(tmp, n, picked);
     for (int i = 0; i < c; i++)
         download_item(&items[picked[i]], wfolder);
-    printf("共下载 %d 个 -> %ls\n", c, wfolder);
+    printf("共下载 %d 个 -> %s\n", c, wide_to_utf8_tmp(wfolder));
     return c;
 }
 
@@ -218,7 +218,7 @@ static void browse_manifest(sqlite3 *rdb, const char *title,
     get_dl_root(wroot, 1024);
     for (int i = 0; i < c; i++)
         download_item(&items[picked[i]], wroot);
-    printf("共下载 %d 个 -> %ls\n", c, wroot);
+    printf("共下载 %d 个 -> %s\n", c, wide_to_utf8_tmp(wroot));
 }
 
 /* 每个类别一个小包装(签名必须和 dbdef.func 一致) */
@@ -937,7 +937,7 @@ static int browse_song(sqlite3 *db, sqlite3 *rdb){
         mkdirs(wfolder);
         for (int i = 0; i < c; i++)
             download_item(&items[picked[i]], wfolder);
-        printf("共下载 %d 个 -> %ls\n", c, wfolder);
+        printf("共下载 %d 个 -> %s\n", c, wide_to_utf8_tmp(wfolder));
     }
     return 0;
 }
@@ -1033,7 +1033,7 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
         mkdirs(wfolder);
         for (int i = 0; i < c; i++)
             download_item(&items[picked[i]], wfolder);
-        printf("共下载 %d 个 -> %ls\n", c, wfolder);
+        printf("共下载 %d 个 -> %s\n", c, wide_to_utf8_tmp(wfolder));
     }
     return 0;
 }
@@ -1075,7 +1075,7 @@ static int browse_voice(sqlite3 *db, sqlite3 *rdb){
             swprintf(wfolder, 1024, L"%ls\\%ls", wroot, wfoldername);
             mkdirs(wfolder);
             download_item(&items[0], wfolder);
-            printf("语音已下载 -> %ls\n", wfolder);
+            printf("语音已下载 -> %s\n", wide_to_utf8_tmp(wfolder));
         }
     }
     return 0;

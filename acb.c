@@ -16,6 +16,8 @@ typedef struct {
 } AcbItem;
 
 static void get_acb2wavs(wchar_t *out, int n){
+    if (!out || n <= 0) return;
+    out[0] = 0;
     wchar_t exedir[1024];
     GetModuleFileNameW(NULL, exedir, 1024);
     wchar_t *p = wcsrchr(exedir, L'\\');
@@ -23,9 +25,7 @@ static void get_acb2wavs(wchar_t *out, int n){
     wchar_t local[1200];
     swprintf(local, 1200, L"%ls\\acb2wavs.exe", exedir);
     if (GetFileAttributesW(local) != INVALID_FILE_ATTRIBUTES){
-        wcscpy(out, local);
-    } else {
-        out[0] = 0;
+        swprintf(out, (size_t)n, L"%ls", local);
     }
 }
 
@@ -162,7 +162,7 @@ int acb_main(void){
                 }
                 if (MoveFileExW(src, dst, MOVEFILE_REPLACE_EXISTING)) {
                     wchar_t *base = wcsrchr(dst, L'\\');
-                    wprintf(L"  -> 音频\\%ls\n", base ? (base + 1) : dst);
+                    printf("  -> 音频\\%s\n", wide_to_utf8_tmp(base ? (base + 1) : dst));
                 }
             } while (FindNextFileW(wh, &wfd));
             FindClose(wh);
@@ -179,7 +179,7 @@ int acb_main(void){
                 swprintf(src, 1200, L"%ls\\封面\\%ls", items[i].folder, cfd.cFileName);
                 swprintf(dst, 1200, L"%ls\\%ls", adir, cfd.cFileName);
                 CopyFileW(src, dst, FALSE);
-                printf("  封面 -> %ls\n", cfd.cFileName);
+                printf("  封面 -> %s\n", wide_to_utf8_tmp(cfd.cFileName));
             } while (FindNextFileW(ch, &cfd));
             FindClose(ch);
         }
@@ -195,7 +195,7 @@ int acb_main(void){
                 swprintf(src, 1200, L"%ls\\%ls", items[i].folder, lfd.cFileName);
                 swprintf(dst, 1200, L"%ls\\%ls", adir, lfd.cFileName);
                 CopyFileW(src, dst, FALSE);
-                printf("  歌词 -> %ls\n", lfd.cFileName);
+                printf("  歌词 -> %s\n", wide_to_utf8_tmp(lfd.cFileName));
             } while (FindNextFileW(lh, &lfd));
             FindClose(lh);
         }

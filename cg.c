@@ -102,7 +102,7 @@ static void MaskAudio(unsigned char *data, int size){
 /* 解一个 usm: 产出 outdir\video.m2v 和 audio.adx(有音频时) */
 static int demux_file(const wchar_t *usm_path, const wchar_t *outdir){
     FILE *fp = _wfopen(usm_path, L"rb");
-    if (!fp){ printf("打不开 %ls\n", usm_path); return -1; }
+    if (!fp){ printf("打不开 %s\n", wide_to_utf8_tmp(usm_path)); return -1; }
     fseek(fp, 0, SEEK_END);
     long fileSize = ftell(fp);
 
@@ -123,23 +123,36 @@ static int demux_file(const wchar_t *usm_path, const wchar_t *outdir){
         unsigned dof = h[9];
         unsigned pad = be16(h + 10);
         unsigned typ = h[15] & 3;
+        if (ds < dof + pad)
+            break;
         unsigned dlen = ds - dof - pad;
         unsigned dpos = pos + 8 + dof;
 
         unsigned char *data = (unsigned char*)malloc(dlen ? dlen : 1);
-        fseek(fp, dpos, SEEK_SET);
-        fread(data, 1, dlen, fp);
+        if (!data) {
+            fprintf(stderr, "解包内存不足\n");
+            break;
+        }
+        if (fseek(fp, dpos, SEEK_SET) != 0 ||
+            fread(data, 1, dlen, fp) != dlen) {
+            free(data);
+            break;
+        }
 
         if (memcmp(h, "@SFV", 4) == 0 && typ == 0){
             MaskVideo(data, dlen);
             if (!vo) vo = _wfopen(vpath, L"wb");
-            fwrite(data, 1, dlen, vo);
-            nvideo++;
+            if (vo) {
+                fwrite(data, 1, dlen, vo);
+                nvideo++;
+            }
         } else if (memcmp(h, "@SFA", 4) == 0 && typ == 0){
             MaskAudio(data, dlen);
             if (!ao) ao = _wfopen(apath, L"wb");
-            fwrite(data, 1, dlen, ao);
-            naudio++;
+            if (ao) {
+                fwrite(data, 1, dlen, ao);
+                naudio++;
+            }
         }
         free(data);
         pos += 8 + ds;
@@ -154,6 +167,7 @@ static int demux_file(const wchar_t *usm_path, const wchar_t *outdir){
 /* ================== 转 mp4 / 解 acb ================== */
 
 static void find_ffmpeg(wchar_t *out, int n){
+    if (!out || n <= 0) return;
     out[0] = 0;
     wchar_t exedir[1024];
     GetModuleFileNameW(NULL, exedir, 1024);
@@ -162,15 +176,15 @@ static void find_ffmpeg(wchar_t *out, int n){
     wchar_t cand[1300];
     swprintf(cand, 1300, L"%ls\\ffmpeg.exe", exedir);
     if (GetFileAttributesW(cand) != INVALID_FILE_ATTRIBUTES){
-        wcscpy(out, cand);
+        swprintf(out, (size_t)n, L"%ls", cand);
         return;
     }
     swprintf(cand, 1300, L"D:\\CGSS动作\\工具\\ffmpeg\\ffmpeg.exe");
     if (GetFileAttributesW(cand) != INVALID_FILE_ATTRIBUTES){
-        wcscpy(out, cand);
+        swprintf(out, (size_t)n, L"%ls", cand);
         return;
     }
-    wcscpy(out, L"ffmpeg");   /* 最后赌 PATH 里有 */
+    swprintf(out, (size_t)n, L"ffmpeg");   /* 最后赌 PATH 里有 */
 }
 
 /* video.m2v (+音频) -> mp4name
@@ -203,7 +217,7 @@ static int convert_mp4(const wchar_t *outdir, const wchar_t *mp4name,
                  L"-c:v libx264 -pix_fmt yuv420p -crf 18 \"%ls\\%ls\"",
                  ffmpeg, outdir, outdir, mp4name);
     }
-    printf("转换 %ls ...\n", mp4name);
+    printf("转换 %s ...\n", wide_to_utf8_tmp(mp4name));
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof si); si.cb = sizeof si;
@@ -215,11 +229,17 @@ static int convert_mp4(const wchar_t *outdir, const wchar_t *mp4name,
     WaitForSingleObject(pi.hProcess, INFINITE);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
-    printf("完成 -> %ls\\%ls\n", outdir, mp4name);
+    {
+        char outdir_u8[4096], mp4name_u8[2048];
+        wide_to_utf8(outdir, outdir_u8, sizeof outdir_u8);
+        wide_to_utf8(mp4name, mp4name_u8, sizeof mp4name_u8);
+        printf("完成 -> %s\\%s\n", outdir_u8, mp4name_u8);
+    }
     return 0;
 }
 
 static void find_acb2wavs(wchar_t *out, int n){
+    if (!out || n <= 0) return;
     out[0] = 0;
     wchar_t exedir[1024];
     GetModuleFileNameW(NULL, exedir, 1024);
@@ -228,7 +248,7 @@ static void find_acb2wavs(wchar_t *out, int n){
     wchar_t cand[1300];
     swprintf(cand, 1300, L"%ls\\acb2wavs.exe", exedir);
     if (GetFileAttributesW(cand) != INVALID_FILE_ATTRIBUTES)
-        wcscpy(out, cand);
+        swprintf(out, (size_t)n, L"%ls", cand);
 }
 
 static int decode_acb(const wchar_t *acb_path){
@@ -240,7 +260,7 @@ static int decode_acb(const wchar_t *acb_path){
     }
     wchar_t cmd[2600];
     swprintf(cmd, 2600, L"\"%ls\" \"%ls\"", tool, acb_path);
-    printf("解码 %ls ...\n", acb_path);
+    printf("解码 %s ...\n", wide_to_utf8_tmp(acb_path));
     STARTUPINFOW si;
     PROCESS_INFORMATION pi;
     memset(&si, 0, sizeof si); si.cb = sizeof si;
@@ -317,7 +337,7 @@ static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
     swprintf(dir, 1200, L"%ls\\%ls_解包", usmdir, base);
     mkdirs(dir);
 
-    printf("\n==== 解包 %ls ====\n", usm_path);
+    printf("\n==== 解包 %s ====\n", wide_to_utf8_tmp(usm_path));
     if (demux_file(usm_path, dir) != 0){
         printf("解包失败\n");
         return;
@@ -381,7 +401,7 @@ static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
     if (first_acb[0])
         find_wav_from_acb(first_acb, audio_wav, 1300);
     if (audio_wav[0])
-        printf("找到音频: %ls, 准备合成进视频\n", audio_wav);
+        printf("找到音频: %s, 准备合成进视频\n", wide_to_utf8_tmp(audio_wav));
     convert_mp4(dir, mp4name, audio_wav);
 }
 
@@ -392,7 +412,7 @@ static void unpack_folder(const wchar_t *dir){
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(pat, &fd);
     if (h == INVALID_HANDLE_VALUE){
-        printf("目录不存在或为空: %ls\n", dir);
+        printf("目录不存在或为空: %s\n", wide_to_utf8_tmp(dir));
         return;
     }
     do {

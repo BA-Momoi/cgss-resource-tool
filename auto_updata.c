@@ -243,7 +243,7 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
     printf("Host:%s\n",utf8_host);
     wide_to_utf8(path,utf8_path,_countof(utf8_path));
     printf("Path:%s\n",utf8_path);
-    printf("port:%u\n",(unsigned long)url.nPort);
+    printf("port:%u\n", (unsigned int)url.nPort);
 
     if(g_sess)
         hConnect = WinHttpConnect(g_sess,host,url.nPort,0);
@@ -278,12 +278,12 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
             
             for(;;){
                 if(!WinHttpQueryDataAvailable(hRequest,&avail)){
-                    printf("ERROR %u IN WINHTTPQUERYDATAAVAILABLE.\n",
-                    GetLastError());
+                    printf("ERROR %lu IN WINHTTPQUERYDATAAVAILABLE.\n",
+                           (unsigned long)GetLastError());
                     DOWNERROR = 1;
                     total = 0;
                     error_count++;
-                    fprintf(stderr,"第%d次下载失败...\n",(error_count++) + 1);
+                    fprintf(stderr,"第%d次下载失败...\n", error_count);
                     break;
                 }
                 if(avail == 0){
@@ -320,7 +320,7 @@ int updata_main(double version){
     BOOL bResults = FALSE;
     Version_num tag = {0};
     snwprintf(tag.down_url,_countof(tag.down_url),L"https://github.com/BA-Momoi/cgss-resource-tool/releases/latest/download/CGSS_ResourceTool.zip");
-    DWORD len = 0;       /* 已存字节数 */
+    size_t len = 0;      /* 已存字节数 */
     char *tmp = NULL;   //存数据的指针
     updata_init();
     if(g_sess)
@@ -349,13 +349,12 @@ int updata_main(double version){
             free(tmp);
             tmp = NULL;
             len = 0;
-            size_t ram_size = 0;
-            DWORD cap = 65536;   /* 容量 */
+            size_t cap = 65536;  /* 容量，额外保留一个字符串结束字节 */
             do{
                 dwSize = 0;
                 if(!WinHttpQueryDataAvailable(hRequest,&dwSize)){
-                    printf("ERROR %u IN WINHTTPQUERYDATAAVAILABLE.\n",
-                    GetLastError());
+                    printf("ERROR %lu IN WINHTTPQUERYDATAAVAILABLE.\n",
+                           (unsigned long)GetLastError());
                     break;
                 }
                     pszOutBuffer = malloc((dwSize+1)*sizeof(char));
@@ -367,7 +366,8 @@ int updata_main(double version){
                 else{
                     ZeroMemory(pszOutBuffer,dwSize+1);
                     if(!WinHttpReadData(hRequest,(LPVOID)pszOutBuffer,dwSize,&dwDownloaded)){
-                        printf("ERROR %u IN WINHTTPREADDATA.\n",GetLastError());
+                        printf("ERROR %lu IN WINHTTPREADDATA.\n",
+                               (unsigned long)GetLastError());
                         DOWNERROR = 1;
                         free(pszOutBuffer);
                         fprintf(stderr,"第%d次下载失败...\n",(error_count++) + 1);
@@ -379,7 +379,7 @@ int updata_main(double version){
                             sscanf(start_ptr,"\"tag_name\":\"v%lf\"",&tag.version); //将版本号提取至变量
                         */
                         if (tmp == NULL){
-                            char *np = (char*)malloc(sizeof(char)*cap);
+                            char *np = (char*)malloc(cap + 1);
                             if (!np){ 
                                 DOWNERROR = 1;
                                 tmp = NULL;
@@ -389,9 +389,9 @@ int updata_main(double version){
                             }
                             tmp = np;
                         }
-                        if (len + dwDownloaded > cap){
-                            while (len + dwDownloaded > cap) cap *= 2;
-                            char *np = (char*)realloc(tmp, cap);
+                        if (len + dwDownloaded >= cap){
+                            while (len + dwDownloaded >= cap) cap *= 2;
+                            char *np = (char*)realloc(tmp, cap + 1);
                             if (!np){ 
                                 free(tmp);
                                 DOWNERROR = 1;
@@ -419,9 +419,9 @@ int updata_main(double version){
         char *np = strstr(tmp,"<title>v");
         if(np){   
             sscanf(np,"<title>v%lf</title>",&tag.version);
-            if(tag.down_url != NULL && tag.version != 0.0){
+            if(tag.down_url[0] != L'\0' && tag.version != 0.0){
                 printf("Version:%.2lf\n",tag.version);
-                wprintf(L"Url:%ls\n",tag.down_url);
+                printf("Url:%s\n", wide_to_utf8_tmp(tag.down_url));
             }else
                 fprintf(stderr,"获取版本号和链接失败\n");
         }
@@ -429,8 +429,11 @@ int updata_main(double version){
             fprintf(stderr,"访问%s后并无有效信息\n","github.com/BA-Momoi/cgss-resource-tool/releases.atom");
         
     }
+    free(tmp);
+    tmp = NULL;
     if(!bResults)
-        fprintf(stderr,"ERROR %d has occurred.\n",GetLastError());
+        fprintf(stderr,"ERROR %lu has occurred.\n",
+                (unsigned long)GetLastError());
     if(hRequest) WinHttpCloseHandle(hRequest);
     if(hConnect) WinHttpCloseHandle(hConnect);
     
@@ -454,9 +457,6 @@ int updata_main(double version){
         fprintf(stderr,"执行PathCchRemoveFileSpec函数发生错误\n");
         return -1;
     }
-    int hc = 0;
-    int zc = 0;
-
     /* 同版本不需要再次下载，否则更新后重启会再次进入更新流程。 */
     if(version < tag.version){
         versiondef choice[] ={
@@ -479,7 +479,7 @@ int updata_main(double version){
         }
         DeleteFileW(update_zip);
 
-        hc = down_file(&tag,wroot,MAX_PATH);
+        int hc = down_file(&tag,wroot,MAX_PATH);
         if(hc != 0){
             return -1;  //下载失败
         }
@@ -490,7 +490,7 @@ int updata_main(double version){
         snprintf(utf8_wroot_file,sizeof utf8_wroot_file,"%s\\updata.zip",utf8_wroot);
         char outpath[MAX_PATH];
         snprintf(outpath,sizeof outpath,"%s\\updata",utf8_wroot);
-        zc = unzip(utf8_wroot_file,outpath);
+        int zc = unzip(utf8_wroot_file,outpath);
 
         if(zc != 1){
             return -1;  //解压失败

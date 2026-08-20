@@ -1514,12 +1514,15 @@ int convert_skels_in_dir(const wchar_t *dir){
             }
             int v38ok = is21 ? (convert_skel21_to_json_v38_w(src, v38, 0.5f) == 0)
                              : (convert_skel_to_json_v38_w(src, v38) == 0);
-            printf("  已生成 %ls + %ls%s\n", fd.cFileName,
-                   wcsrchr(v38, L'\\') ? wcsrchr(v38, L'\\') + 1 : v38,
+            char source_name_u8[4096], v38_name_u8[4096];
+            wide_to_utf8(fd.cFileName, source_name_u8, sizeof source_name_u8);
+            wide_to_utf8(wcsrchr(v38, L'\\') ? wcsrchr(v38, L'\\') + 1 : v38,
+                         v38_name_u8, sizeof v38_name_u8);
+            printf("  已生成 %s + %s%s\n", source_name_u8, v38_name_u8,
                    v38ok ? "" : "（3.8版失败）");
             n++;
         } else {
-            printf("  转换失败 %ls\n", fd.cFileName);
+            printf("  转换失败 %s\n", wide_to_utf8_tmp(fd.cFileName));
         }
     } while (FindNextFileW(h, &fd));
     FindClose(h);
