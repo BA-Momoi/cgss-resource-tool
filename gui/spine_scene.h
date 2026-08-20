@@ -7,8 +7,9 @@
 struct SDL_Renderer;
 
 typedef struct SpineScene SpineScene;
-
+/*创建Spine场景*/
 SpineScene *spine_scene_create(struct SDL_Renderer *renderer);
+/*删除Spine场景*/
 void spine_scene_destroy(SpineScene *scene);
 
 /*
