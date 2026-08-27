@@ -52,3 +52,4 @@ docs/
 cysp_convert.c
 cysp_convert.h
 master.mdb-journal
+*.unity3d
