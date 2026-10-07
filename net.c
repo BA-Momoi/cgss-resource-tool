@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <limits.h>
 #include <windows.h>
 #include <winhttp.h>
 #include "net.h"
@@ -55,89 +56,119 @@ int cgss_lz4_decompress(const unsigned char *raw, int raw_len, unsigned char **o
 
 /* ================== HTTP 下载 ================== */
 
-static HINTERNET g_sess = NULL, g_conn = NULL;
-
-/* ??/????????????? TLS ?? */
-
-static void http_init(void){
-    if (g_sess) return;
-    g_sess = WinHttpOpen(L"CGSS-DL/1.0", WINHTTP_ACCESS_TYPE_NO_PROXY,
-                         WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
-    if (!g_sess) return;
-    DWORD to = 60000;   /* ??/??/??/???? 60 ? */
-    WinHttpSetTimeouts(g_sess, to, to, to, to);
-    g_conn = WinHttpConnect(g_sess, CDN_HOST, INTERNET_DEFAULT_HTTPS_PORT, 0);
-}
-
-
 static int http_get(const char *url_path, const wchar_t *wsave){
     wchar_t wpath[512];
     utf8_to_wide(url_path, wpath, 512);
 
-    http_init();
-    if (!g_sess || !g_conn) return -1;
-    HINTERNET req = WinHttpOpenRequest(g_conn, L"GET", wpath, NULL, WINHTTP_NO_REFERER,
+    HINTERNET sess = WinHttpOpen(L"CGSS-DL/1.0", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
+                                  WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
+    if (!sess){
+        fprintf(stderr, "WinHTTP 初始化失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        return -1;
+    }
+    DWORD timeout = 60000;
+    WinHttpSetTimeouts(sess, timeout, timeout, timeout, timeout);
+    DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+#ifdef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3
+    protocols |= WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+#endif
+    if (!WinHttpSetOption(sess, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols)))
+        fprintf(stderr, "设置 TLS 1.2/1.3 失败 (错误 %lu)\n", (unsigned long)GetLastError());
+
+    HINTERNET conn = WinHttpConnect(sess, CDN_HOST, INTERNET_DEFAULT_HTTPS_PORT, 0);
+    if (!conn){
+        fprintf(stderr, "连接资源 CDN 失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        WinHttpCloseHandle(sess);
+        return -1;
+    }
+    HINTERNET req = WinHttpOpenRequest(conn, L"GET", wpath, NULL, WINHTTP_NO_REFERER,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
-    if (!req) return -1;
-    WinHttpAddRequestHeaders(req,
+    if (!req){
+        fprintf(stderr, "创建 CDN 请求失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        WinHttpCloseHandle(conn);
+        WinHttpCloseHandle(sess);
+        return -1;
+    }
+    if (!WinHttpAddRequestHeaders(req,
         L"User-Agent: UnityPlayer/2022.3.56f1 (UnityWebRequest/1.0, libcurl/8.10.1-DEV)\r\n"
         L"X-Unity-Version: 2022.3.56f1",
-        (DWORD)-1, WINHTTP_ADDREQ_FLAG_REPLACE | WINHTTP_ADDREQ_FLAG_ADD);
+        (DWORD)-1, WINHTTP_ADDREQ_FLAG_REPLACE | WINHTTP_ADDREQ_FLAG_ADD)){
+        fprintf(stderr, "设置 Unity 请求头失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        WinHttpCloseHandle(req);
+        WinHttpCloseHandle(conn);
+        WinHttpCloseHandle(sess);
+        return -1;
+    }
 
     int rc = -1;
-    BOOL ok_send = WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
-                           WINHTTP_NO_REQUEST_DATA, 0, 0, 0);
-    if (!ok_send){
-        printf("SendRequest err=%lu\n", (unsigned long)GetLastError());
+    if (!WinHttpSendRequest(req, WINHTTP_NO_ADDITIONAL_HEADERS, 0,
+                            WINHTTP_NO_REQUEST_DATA, 0, 0, 0)){
+        fprintf(stderr, "发送 CDN 请求失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        goto cleanup;
     }
-    BOOL ok_recv = ok_send && WinHttpReceiveResponse(req, NULL);
-    if (ok_send && !ok_recv){
-        printf("ReceiveResponse err=%lu\n", (unsigned long)GetLastError());
+    if (!WinHttpReceiveResponse(req, NULL)){
+        fprintf(stderr, "接收 CDN 响应失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        goto cleanup;
     }
-    if (ok_recv){
-        DWORD status = 0, slen = sizeof(status);
-        WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
-                            WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX);
-        if (status != 200){
-            printf("HTTP err: %lu\n", (unsigned long)status);
+
+    DWORD status = 0, slen = sizeof(status);
+    if (!WinHttpQueryHeaders(req, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                             WINHTTP_HEADER_NAME_BY_INDEX, &status, &slen, WINHTTP_NO_HEADER_INDEX)){
+        fprintf(stderr, "读取 CDN HTTP 状态失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        goto cleanup;
+    }
+    if (status != HTTP_STATUS_OK){
+        fprintf(stderr, "CDN 返回 HTTP %lu: %s\n", (unsigned long)status, url_path);
+        goto cleanup;
+    }
+
+    HANDLE f = CreateFileW(wsave, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
+                           FILE_ATTRIBUTE_NORMAL, NULL);
+    if (f == INVALID_HANDLE_VALUE){
+        fprintf(stderr, "创建下载文件失败 (错误 %lu)\n", (unsigned long)GetLastError());
+        goto cleanup;
+    }
+
+    unsigned char buf[131072];
+    DWORD dwSize = 0, dwRead = 0, wr = 0;
+    LONGLONG total = 0;
+    int completed = 0;
+    DWORD transfer_error = ERROR_SUCCESS;
+    for (;;){
+        if (!WinHttpQueryDataAvailable(req, &dwSize)){
+            transfer_error = GetLastError();
+            break;
         }
-        if (status == 200){
-            HANDLE f = CreateFileW(wsave, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-                                   FILE_ATTRIBUTE_NORMAL, NULL);
-            if (f == INVALID_HANDLE_VALUE){
-                printf("CreateFileW err=%lu\n", (unsigned long)GetLastError());
-            }
-            if (f != INVALID_HANDLE_VALUE){
-                unsigned char buf[131072];
-                DWORD dwSize = 0, dwRead = 0, wr = 0;
-                LONGLONG total = 0;
-                int lastdot = 0;
-                int completed = 0;
-                for (;;){
-                    if (!WinHttpQueryDataAvailable(req, &dwSize)) break;
-                    if (dwSize == 0){ completed = 1; break; }
-                    if (dwSize > sizeof buf) dwSize = sizeof buf;
-                    if (!WinHttpReadData(req, buf, dwSize, &dwRead) || dwRead == 0) break;
-                    WriteFile(f, buf, dwRead, &wr, NULL);
-                    total += dwRead;
-                    if ((int)(total / (512 * 1024)) != lastdot){
-                        lastdot = (int)(total / (512 * 1024));
-                        printf(".");
-                        fflush(stdout);
-                    }
-                }
-                CloseHandle(f);
-                if (completed && total > 0){
-                    printf("(%lldKB)\n", (long long)(total / 1024));
-                    rc = 0;
-                } else {
-                    printf("下载未完成 err=%lu\n", (unsigned long)GetLastError());
-                    DeleteFileW(wsave);
-                }
-            }
+        if (dwSize == 0){ completed = 1; break; }
+        if (dwSize > sizeof buf) dwSize = sizeof buf;
+        if (!WinHttpReadData(req, buf, dwSize, &dwRead)){
+            transfer_error = GetLastError();
+            break;
         }
+        if (dwRead == 0){
+            transfer_error = ERROR_HANDLE_EOF;
+            break;
+        }
+        if (!WriteFile(f, buf, dwRead, &wr, NULL) || wr != dwRead){
+            transfer_error = GetLastError();
+            if (transfer_error == ERROR_SUCCESS) transfer_error = ERROR_WRITE_FAULT;
+            break;
+        }
+        total += dwRead;
     }
+    CloseHandle(f);
+    if (completed && total > 0){
+        rc = 0;
+    } else {
+        if (transfer_error != ERROR_SUCCESS)
+            fprintf(stderr, "接收或写入资源失败 (错误 %lu)\n", (unsigned long)transfer_error);
+        DeleteFileW(wsave);
+    }
+
+cleanup:
     WinHttpCloseHandle(req);
+    WinHttpCloseHandle(conn);
+    WinHttpCloseHandle(sess);
     return rc;
 }
 
@@ -160,19 +191,24 @@ int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
     wchar_t wfile[512];
     utf8_to_wide(base_name(name), wfile, 512);
     swprintf(wsave, 1024, L"%ls\\%ls", save_dir, wfile);
-    printf("下载 %s ... ", name);
     if (http_get(url_path, wsave) != 0){
-        printf("失败(HTTP错误)\n");
+        printf("下载 %s ... 失败（网络诊断见上方）\n", name);
         return -1;
     }
     /* .unity3d ?? LZ4 ?? */
     if (strstr(name, ".unity3d")){
         FILE *f = _wfopen(wsave, L"rb");
-        if (!f){ printf("打开失败\n"); return -1; }
+        if (!f){ printf("下载 %s ... 打开失败\n", name); return -1; }
         fseek(f, 0, SEEK_END);
         long sz = ftell(f);
         fseek(f, 0, SEEK_SET);
+        if (sz <= 0 || sz > INT_MAX){
+            fclose(f);
+            printf("下载 %s ... 文件大小无效\n", name);
+            return -1;
+        }
         unsigned char *raw = (unsigned char*)malloc(sz > 0 ? sz : 1);
+        if (!raw){ fclose(f); printf("下载 %s ... 内存不足\n", name); return -1; }
         if (sz > 0) fread(raw, 1, sz, f);
         fclose(f);
         unsigned char *out = NULL;
@@ -180,21 +216,72 @@ int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
         if (cgss_lz4_decompress(raw, (int)sz, &out, &out_len) == 0 && out && out_len > 0){
             FILE *fo = _wfopen(wsave, L"wb");
             if (fo){
-                fwrite(out, 1, out_len, fo);    //将out写入fo文件
+                size_t written = fwrite(out, 1, out_len, fo);
                 fclose(fo);
-                printf("完成(已LZ4解压 %d -> %d)\n", (int)sz, out_len);
+                if (written != (size_t)out_len){
+                    free(raw);
+                    free(out);
+                    printf("下载 %s ... 写入解压文件失败\n", name);
+                    return -1;
+                }
+                printf("下载 %s ... 完成(LZ4 %d -> %d)\n", name, (int)sz, out_len);
             } else {
-                printf("写文件失败\n");
+                free(raw);
+                free(out);
+                printf("下载 %s ... 写文件失败\n", name);
+                return -1;
             }
         } else {
-            printf("完成(非LZ4包裹)\n");
+            printf("下载 %s ... 完成(非LZ4包裹)\n", name);
         }
         free(raw);
         free(out);
     } else {
-        printf("完成\n");
+        printf("下载 %s ... 完成\n", name);
     }
     return 0;
+}
+
+typedef struct {
+    const DlTask *tasks;
+    size_t count;
+    volatile LONG next;
+    volatile LONG successes;
+} DlQueue;
+
+static DWORD WINAPI dl_worker(LPVOID param){
+    DlQueue *queue = (DlQueue*)param;
+    for (;;){
+        LONG index = InterlockedIncrement(&queue->next) - 1;
+        if (index < 0 || (size_t)index >= queue->count) break;
+        const DlTask *task = &queue->tasks[index];
+        if (dl_one(task->name, task->hash, task->save_dir) == 0)
+            InterlockedIncrement(&queue->successes);
+    }
+    return 0;
+}
+
+int dl_many(const DlTask *tasks, size_t count){
+    if (!tasks || count == 0) return 0;
+    if (count > LONG_MAX) return -1;
+
+    unsigned worker_count = (unsigned)(count < 4 ? count : 4);
+    DlQueue queue = {tasks, count, -1, 0};
+    HANDLE workers[4];
+    unsigned started = 0;
+    for (; started < worker_count; started++){
+        workers[started] = CreateThread(NULL, 0, dl_worker, &queue, 0, NULL);
+        if (!workers[started]) break;
+    }
+    if (started == 0){
+        dl_worker(&queue);
+        return (int)queue.successes;
+    }
+    for (unsigned i = 0; i < started; i++){
+        WaitForSingleObject(workers[i], INFINITE);
+        CloseHandle(workers[i]);
+    }
+    return (int)queue.successes;
 }
 
 /* ================== 清单查询与资源收集 ================== */

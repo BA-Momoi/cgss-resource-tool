@@ -4,16 +4,25 @@
 #include <string.h>
 #include <windows.h>
 #include <wchar.h>
+#include <limits.h>
+#include <stdint.h>
 #include "acb.h"
 #include "util.h"
+#include "paper.h"
 
 typedef struct {
     wchar_t folder[512];
     wchar_t acbdir[512];
     wchar_t acb[512];
-    char acb_name[256];
-    char folder_name[256];
+    char acb_name[1024];
+    char folder_name[1024];
 } AcbItem;
+
+typedef struct {
+    AcbItem *items;
+    int count;
+    int capacity;
+} AcbList;
 
 static void get_acb2wavs(wchar_t *out, int n){
     wchar_t exedir[1024];
@@ -29,81 +38,136 @@ static void get_acb2wavs(wchar_t *out, int n){
     }
 }
 
-/* 取 exe 所在目录的 CGSS_DOWN 根路径 */
+static int add_acb(AcbList *list, const wchar_t *dir, const wchar_t *filename,
+                   const wchar_t *folder, const char *folder_name){
+    wchar_t path[512];
+    int written = swprintf(path, _countof(path), L"%ls\\%ls", dir, filename);
+    if (written < 0 || (size_t)written >= _countof(path) ||
+        wcslen(folder) >= _countof(list->items[0].folder)){
+        fprintf(stderr, "ACB 路径过长: %ls\\%ls\n", dir, filename);
+        return -1;
+    }
+    if (list->count == INT_MAX - 1) return -1;
+    if (list->count == list->capacity){
+        int capacity = list->capacity == 0 ? 64 :
+            (list->capacity > (INT_MAX - 1) / 2 ? INT_MAX - 1 :
+             list->capacity * 2);
+        if ((size_t)capacity > SIZE_MAX / sizeof *list->items) return -1;
+        AcbItem *items = realloc(list->items, (size_t)capacity * sizeof *items);
+        if (!items) return -1;
+        list->items = items;
+        list->capacity = capacity;
+    }
+    AcbItem *item = &list->items[list->count];
+    wcscpy(item->folder, folder);
+    wcscpy(item->acbdir, dir);
+    wcscpy(item->acb, path);
+    wide_to_utf8(filename, item->acb_name, sizeof item->acb_name);
+    snprintf(item->folder_name, sizeof item->folder_name, "%s", folder_name);
+    list->count++;
+    return 0;
+}
 
-static void scan_acb(const wchar_t *dir, AcbItem *items, int *n,
-                     const wchar_t *chara_folder, const char *chara_name, int depth){
+static int scan_acb(const wchar_t *dir, AcbList *list,
+                    const wchar_t *chara_folder, const char *chara_name){
     wchar_t pat[1200];
-    swprintf(pat, 1200, L"%ls\\*", dir);
+    int written = swprintf(pat, _countof(pat), L"%ls\\*", dir);
+    if (written < 0 || (size_t)written >= _countof(pat)) return -1;
     WIN32_FIND_DATAW fd;
     HANDLE h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE) return;
+    if (h == INVALID_HANDLE_VALUE){
+        DWORD error = GetLastError();
+        if (error == ERROR_FILE_NOT_FOUND || error == ERROR_PATH_NOT_FOUND)
+            return 0;
+        fprintf(stderr, "扫描 ACB 目录失败: %ls (%lu)\n", dir, error);
+        return -1;
+    }
+    int result = 0;
     do {
-        if (fd.cFileName[0] == L'.') continue;
+        if (wcscmp(fd.cFileName, L".") == 0 ||
+            wcscmp(fd.cFileName, L"..") == 0) continue;
         if (fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY){
-            if (depth < 3){
-                wchar_t sub[1200];
-                swprintf(sub, 1200, L"%ls\\%ls", dir, fd.cFileName);
-                scan_acb(sub, items, n, chara_folder, chara_name, depth + 1);
+            /* Directory links can lead back into already scanned folders. */
+            if (fd.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+            wchar_t sub[1200];
+            written = swprintf(sub, _countof(sub), L"%ls\\%ls", dir, fd.cFileName);
+            if (written < 0 || (size_t)written >= _countof(sub)){
+                result = -1;
+                break;
+            }
+            char folder_name[1024];
+            wide_to_utf8(fd.cFileName, folder_name, sizeof folder_name);
+            if (scan_acb(sub, list, chara_folder ? chara_folder : sub,
+                         chara_name ? chara_name : folder_name) != 0){
+                result = -1;
+                break;
             }
             continue;
         }
         const wchar_t *dot = wcsrchr(fd.cFileName, L'.');
         if (!dot || _wcsicmp(dot, L".acb") != 0) continue;
-        if (*n >= 64) break;
-        wcscpy(items[*n].folder, chara_folder);
-        swprintf(items[*n].acbdir, 512, L"%ls", dir);
-        swprintf(items[*n].acb, 512, L"%ls\\%ls", dir, fd.cFileName);
-        wide_to_utf8(fd.cFileName, items[*n].acb_name, sizeof items[*n].acb_name);
-        snprintf(items[*n].folder_name, sizeof items[*n].folder_name, "%s", chara_name);
-        (*n)++;
+        if (add_acb(list, dir, fd.cFileName,
+                    chara_folder ? chara_folder : dir,
+                    chara_name ? chara_name : "CGSS_DOWN") != 0){
+            result = -1;
+            break;
+        }
     } while (FindNextFileW(h, &fd));
+    if (result == 0 && GetLastError() != ERROR_NO_MORE_FILES){
+        fprintf(stderr, "扫描 ACB 目录未完成: %ls (%lu)\n", dir, GetLastError());
+        result = -1;
+    }
     FindClose(h);
+    return result;
 }
 
+static int compare_acb(const void *left, const void *right){
+    return _wcsicmp(((const AcbItem*)left)->acb, ((const AcbItem*)right)->acb);
+}
 
 int acb_main(void){
     wchar_t wroot[1024];
     get_dl_root(wroot, 1024);
 
 
-    /* 递归扫描 CGSS_DOWN\*\...\*.acb */
-    AcbItem items[64];
-    int n = 0;
-    wchar_t pat[1200];
-    swprintf(pat, 1200, L"%ls\\*", wroot);
-    WIN32_FIND_DATAW fd;
-    HANDLE h = FindFirstFileW(pat, &fd);
-    if (h == INVALID_HANDLE_VALUE){
-        printf("CGSS_DOWN 还没有下载内容\n");
+    AcbList list = {0};
+    if (scan_acb(wroot, &list, NULL, NULL) != 0){
+        fprintf(stderr, "ACB 扫描失败，未显示不完整列表\n");
+        free(list.items);
         return 1;
     }
-    do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) continue;
-        if (fd.cFileName[0] == L'.') continue;
-        char chara_name[256];
-        wide_to_utf8(fd.cFileName, chara_name, sizeof chara_name);
-        wchar_t chara_dir[1200];
-        swprintf(chara_dir, 1200, L"%ls\\%ls", wroot, fd.cFileName);
-        scan_acb(chara_dir, items, &n, chara_dir, chara_name, 0);
-    } while (FindNextFileW(h, &fd));
-    FindClose(h);
-
+    AcbItem *items = list.items;
+    int n = list.count;
     if (n == 0){
         printf("CGSS_DOWN 里没有找到 acb 文件\n");
+        free(items);
+        return 1;
+    }
+    qsort(items, (size_t)n, sizeof *items, compare_acb);
+    if ((size_t)n + 1 > SIZE_MAX / sizeof(dbdef)){
+        free(items);
+        return 1;
+    }
+    dbdef *menu = calloc((size_t)n + 1, sizeof *menu);
+    if (!menu){
+        fprintf(stderr, "ACB 列表内存分配失败\n");
+        free(items);
         return 1;
     }
     for (int i = 0; i < n; i++)
-        printf("[%d] %s : %s\n", i + 1, items[i].folder_name, items[i].acb_name);
-    printf("选择解压（空格/逗号分隔数字，a=全部，0=返回）：");
-    char buf[128];
-    if (fgets(buf, sizeof buf, stdin) == NULL) return 1;
-    int sel[64], nsel = parse_multi(buf, sel, n);
-    if (nsel < 0){ nsel = n; for (int i = 0; i < n; i++) sel[i] = i + 1; }
-    if (nsel == 0) return 1;
+        snprintf(menu[i].name, sizeof menu[i].name, "%s : %s",
+                 items[i].acb_name, items[i].folder_name);
+    strcpy(menu[n].name, "END");
+    char title[128];
+    snprintf(title, sizeof title, "ACB文件解包（共%d个）", n);
+    if (pager_picks(title, menu, NULL, NULL, 1) <= 0){
+        free(menu);
+        free(items);
+        return 1;
+    }
 
-    for (int s = 0; s < nsel; s++){
-        int i = sel[s] - 1;
+    for (int i = 0; i < n; i++){
+        if (!menu[i].state) continue;
         printf("解码 %s ...\n", items[i].acb_name);
         wchar_t cmd[2048];
         wchar_t wacb2wavs[512];
@@ -200,6 +264,8 @@ int acb_main(void){
             FindClose(lh);
         }
     }
+    free(menu);
+    free(items);
     printf("全部完成\n");
     return 0;
 }

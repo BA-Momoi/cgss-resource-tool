@@ -12,6 +12,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include <windows.h>
 #include <winhttp.h>
 #include "sqlite3.h"
@@ -209,19 +210,36 @@ static int http_get_mem(const wchar_t *host, const wchar_t *path,
         if (status == 200){
             DWORD cap = 65536, len = 0;
             unsigned char *buf = (unsigned char*)malloc(cap);
-            DWORD avail = 0;
-            while (WinHttpQueryDataAvailable(req, &avail) && avail > 0){
+            int complete = buf != NULL;
+            for (;;){
+                DWORD avail = 0;
+                if (!WinHttpQueryDataAvailable(req, &avail)){
+                    complete = 0;
+                    break;
+                }
+                if (avail == 0) break;
+                if (avail > MAXDWORD - len){
+                    complete = 0;
+                    break;
+                }
                 if (len + avail > cap){
-                    while (len + avail > cap) cap *= 2;
+                    while (len + avail > cap){
+                        if (cap > MAXDWORD / 2){ cap = len + avail; break; }
+                        cap *= 2;
+                    }
                     unsigned char *nb = (unsigned char*)realloc(buf, cap);
-                    if (!nb){ free(buf); buf = NULL; break; }
+                    if (!nb){ complete = 0; break; }
                     buf = nb;
                 }
                 DWORD got = 0;
-                if (!WinHttpReadData(req, buf + len, avail, &got) || got == 0) break;
+                if (!WinHttpReadData(req, buf + len, avail, &got) || got == 0){
+                    complete = 0;
+                    break;
+                }
                 len += got;
             }
-            if (buf){ *out = buf; *out_len = len; rc = 0; }
+            if (complete && buf){ *out = buf; *out_len = len; rc = 0; }
+            else free(buf);
         } else {
             printf("HTTP %lu\n", (unsigned long)status);
         }
@@ -259,12 +277,22 @@ static int http_get_file(const wchar_t *host, const wchar_t *path, const wchar_t
                 DWORD avail = 0, got = 0, wr = 0;
                 LONGLONG total = 0;
                 int lastdot = 0;
+                int complete = 1;
                 for (;;){
-                    if (!WinHttpQueryDataAvailable(req, &avail)) break;
+                    if (!WinHttpQueryDataAvailable(req, &avail)){
+                        complete = 0;
+                        break;
+                    }
                     if (avail == 0) break;
                     if (avail > sizeof buf) avail = sizeof buf;
-                    if (!WinHttpReadData(req, buf, avail, &got) || got == 0) break;
-                    WriteFile(f, buf, got, &wr, NULL);
+                    if (!WinHttpReadData(req, buf, avail, &got) || got == 0){
+                        complete = 0;
+                        break;
+                    }
+                    if (!WriteFile(f, buf, got, &wr, NULL) || wr != got){
+                        complete = 0;
+                        break;
+                    }
                     total += wr;
                     if ((int)(total / (512 * 1024)) != lastdot){
                         lastdot = (int)(total / (512 * 1024));
@@ -274,7 +302,8 @@ static int http_get_file(const wchar_t *host, const wchar_t *path, const wchar_t
                 }
                 CloseHandle(f);
                 printf(" (%lldKB)\n", (long long)(total / 1024));
-                if (total > 0) rc = 0;
+                if (complete && total > 0) rc = 0;
+                else DeleteFileW(file);
             }
         } else {
             printf("HTTP %lu\n", (unsigned long)status);
@@ -371,14 +400,28 @@ static int lz4_to_file(const wchar_t *lz4_file, const char *expect_hash, const w
         return -1;
     }
     LARGE_INTEGER sz;
-    GetFileSizeEx(f, &sz);
+    if (!GetFileSizeEx(f, &sz) || sz.QuadPart <= 0 || sz.QuadPart > INT_MAX){
+        CloseHandle(f);
+        DeleteFileW(lz4_file);
+        return -1;
+    }
     unsigned char *raw = (unsigned char*)malloc((size_t)sz.QuadPart);
     if (!raw){ CloseHandle(f); printf("内存不足\n"); return -1; }
     DWORD total_read = 0, got = 0;
-    while (total_read < (DWORD)sz.QuadPart &&
-           ReadFile(f, raw + total_read, (DWORD)sz.QuadPart - total_read, &got, NULL) && got > 0)
+    int read_ok = 1;
+    while (total_read < (DWORD)sz.QuadPart){
+        if (!ReadFile(f, raw + total_read, (DWORD)sz.QuadPart - total_read, &got, NULL) || got == 0){
+            read_ok = 0;
+            break;
+        }
         total_read += got;
+    }
     CloseHandle(f);
+    if (!read_ok || total_read != (DWORD)sz.QuadPart){
+        free(raw);
+        DeleteFileW(lz4_file);
+        return -1;
+    }
 
     if (expect_hash){
         MD5_CTX ctx;
@@ -414,8 +457,16 @@ static int lz4_to_file(const wchar_t *lz4_file, const char *expect_hash, const w
     WriteFile(f, out, (DWORD)out_len, &wr, NULL);
     CloseHandle(f);
     free(out);
-    if (wr != (DWORD)out_len){ printf("写入不完整\n"); return -1; }
-    MoveFileExW(tmp, out_file, MOVEFILE_REPLACE_EXISTING);
+    if (wr != (DWORD)out_len){
+        printf("写入不完整\n");
+        DeleteFileW(tmp);
+        return -1;
+    }
+    if (!MoveFileExW(tmp, out_file, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)){
+        printf("替换 %ls 失败: %lu\n", out_file, (unsigned long)GetLastError());
+        DeleteFileW(tmp);
+        return -1;
+    }
     printf("完成: %ls (%dKB -> %dKB)\n", out_file, (int)(sz.QuadPart/1024), out_len/1024);
     DeleteFileW(lz4_file);
     return 0;
@@ -444,38 +495,280 @@ static int get_master_hash(const wchar_t *manifest_path, char *hash_out, int n){
     return rc;
 }
 
-/* master.mdb 不存在时自动下载补齐 */
-static int ensure_master(const wchar_t *dir, const wchar_t *manifest_path){
-    wchar_t master_file[1200];
-    swprintf(master_file, 1200, L"%ls\\master.mdb", dir);
-    if (GetFileAttributesW(master_file) != INVALID_FILE_ATTRIBUTES){
-        printf("master.mdb 已存在，跳过\n");
+static int md5_file(const wchar_t *path, char out[33]){
+    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, NULL,
+                              OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (file == INVALID_HANDLE_VALUE) return -1;
+    MD5_CTX ctx;
+    md5_init(&ctx);
+    unsigned char buf[131072];
+    DWORD got = 0;
+    BOOL ok = TRUE;
+    for (;;){
+        if (!ReadFile(file, buf, sizeof buf, &got, NULL)){
+            ok = FALSE;
+            break;
+        }
+        if (got == 0) break;
+        md5_update(&ctx, buf, got);
+    }
+    CloseHandle(file);
+    if (!ok) return -1;
+    unsigned char digest[16];
+    md5_final(&ctx, digest);
+    md5_hex(digest, out);
+    return 0;
+}
+
+static int valid_md5(const char *hash){
+    if (strlen(hash) != 32) return 0;
+    for (int i = 0; i < 32; i++)
+        if (!((hash[i] >= '0' && hash[i] <= '9') ||
+              (hash[i] >= 'a' && hash[i] <= 'f') ||
+              (hash[i] >= 'A' && hash[i] <= 'F')))
+            return 0;
+    return 1;
+}
+
+static int read_sync_state(const wchar_t *path, char resource_hash[64],
+                           char file_hash[64]){
+    FILE *f = _wfopen(path, L"rb");
+    if (!f) return 0;
+    int read_ok = fgets(resource_hash, 64, f) != NULL &&
+                  fgets(file_hash, 64, f) != NULL;
+    fclose(f);
+    resource_hash[strcspn(resource_hash, "\r\n")] = 0;
+    file_hash[strcspn(file_hash, "\r\n")] = 0;
+    return read_ok && valid_md5(resource_hash) && valid_md5(file_hash);
+}
+
+static int write_sync_state(const wchar_t *path, const char *resource_hash,
+                            const char *file_hash){
+    wchar_t tmp[1240];
+    swprintf(tmp, 1240, L"%ls.tmp", path);
+    FILE *f = _wfopen(tmp, L"wb");
+    if (!f) return -1;
+    int ok = fprintf(f, "%s\n%s\n", resource_hash, file_hash) > 0;
+    if (fclose(f) != 0) ok = 0;
+    if (!ok || !MoveFileExW(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)){
+        DeleteFileW(tmp);
+        return -1;
+    }
+    return 0;
+}
+
+static int validate_master_db(const wchar_t *path);
+
+static int master_sync_matches(const wchar_t *dir, const wchar_t *master_file,
+                               const char *resource_hash){
+    if (GetFileAttributesW(master_file) == INVALID_FILE_ATTRIBUTES) return 0;
+    char actual_file[33];
+    if (md5_file(master_file, actual_file) != 0) return -1;
+
+    wchar_t state_file[1200];
+    swprintf(state_file, 1200, L"%ls\\master.mdb.sync", dir);
+    char saved_resource[64] = "", saved_file[64] = "";
+    if (!read_sync_state(state_file, saved_resource, saved_file) ||
+        _stricmp(saved_resource, resource_hash) != 0)
+        return 0;
+    return _stricmp(actual_file, saved_file) == 0;
+}
+
+static int recover_master_sync(const wchar_t *dir, const wchar_t *master_file,
+                               const wchar_t *staged_file,
+                               const wchar_t *staged_state,
+                               const char *resource_hash){
+    char saved_resource[64] = "", saved_file[64] = "";
+    if (!read_sync_state(staged_state, saved_resource, saved_file) ||
+        _stricmp(saved_resource, resource_hash) != 0 ||
+        GetFileAttributesW(staged_file) != INVALID_FILE_ATTRIBUTES)
+        return 0;
+    if (GetFileAttributesW(master_file) == INVALID_FILE_ATTRIBUTES) return 0;
+
+    char actual_file[33];
+    if (md5_file(master_file, actual_file) != 0) return -1;
+    if (_stricmp(actual_file, saved_file) != 0) return 0;
+
+    wchar_t state_file[1200];
+    swprintf(state_file, 1200, L"%ls\\master.mdb.sync", dir);
+    if (write_sync_state(state_file, resource_hash, saved_file) != 0)
+        return -1;
+    DeleteFileW(staged_state);
+    return 1;
+}
+
+static int staged_master_matches(const wchar_t *staged_file,
+                                 const wchar_t *staged_state,
+                                 const char *resource_hash){
+    if (GetFileAttributesW(staged_file) == INVALID_FILE_ATTRIBUTES) return 0;
+    char saved_resource[64] = "", saved_file[64] = "";
+    if (!read_sync_state(staged_state, saved_resource, saved_file) ||
+        _stricmp(saved_resource, resource_hash) != 0)
+        return 0;
+    char actual_file[33];
+    if (md5_file(staged_file, actual_file) != 0) return -1;
+    if (_stricmp(actual_file, saved_file) != 0) return 0;
+    return validate_master_db(staged_file) ? 1 : 0;
+}
+
+static int write_master_sync(const wchar_t *dir, const char *resource_hash,
+                             const char *file_hash){
+    wchar_t path[1200];
+    swprintf(path, 1200, L"%ls\\master.mdb.sync", dir);
+    return write_sync_state(path, resource_hash, file_hash);
+}
+
+static int validate_master_db(const wchar_t *path){
+    char utf8_path[1200];
+    wide_to_utf8_buf(path, utf8_path, sizeof utf8_path);
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(utf8_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK){
+        if (db) sqlite3_close(db);
         return 0;
     }
+    sqlite3_stmt *stmt = NULL;
+    int valid = 0;
+    if (sqlite3_prepare_v2(db, "PRAGMA quick_check", -1, &stmt, NULL) == SQLITE_OK &&
+        sqlite3_step(stmt) == SQLITE_ROW &&
+        strcmp((const char*)sqlite3_column_text(stmt, 0), "ok") == 0){
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+        if (sqlite3_prepare_v2(db,
+                "SELECT count(*) FROM sqlite_master WHERE type='table' "
+                "AND name IN ('music_data','live_data','live_bg_replace')",
+                -1, &stmt, NULL) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW)
+            valid = sqlite3_column_int(stmt, 0) == 3;
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return valid;
+}
+
+static int validate_manifest_db(const wchar_t *path){
+    char utf8_path[1200];
+    wide_to_utf8_buf(path, utf8_path, sizeof utf8_path);
+    sqlite3 *db = NULL;
+    if (sqlite3_open_v2(utf8_path, &db, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK){
+        if (db) sqlite3_close(db);
+        return 0;
+    }
+    sqlite3_stmt *stmt = NULL;
+    int valid = 0;
+    if (sqlite3_prepare_v2(db, "PRAGMA quick_check", -1, &stmt, NULL) == SQLITE_OK &&
+        sqlite3_step(stmt) == SQLITE_ROW &&
+        strcmp((const char*)sqlite3_column_text(stmt, 0), "ok") == 0){
+        sqlite3_finalize(stmt);
+        stmt = NULL;
+        if (sqlite3_prepare_v2(db,
+                "SELECT hash FROM manifests WHERE name='master.mdb'",
+                -1, &stmt, NULL) == SQLITE_OK && sqlite3_step(stmt) == SQLITE_ROW){
+            const char *hash = (const char*)sqlite3_column_text(stmt, 0);
+            valid = hash && valid_md5(hash);
+        }
+    }
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return valid;
+}
+
+/* Keep master.mdb synchronized with the selected manifest; replace only verified data. */
+static int ensure_master(const wchar_t *dir, const wchar_t *manifest_path){
+    wchar_t master_file[1200], staged_file[1200];
+    swprintf(master_file, 1200, L"%ls\\master.mdb", dir);
+    swprintf(staged_file, 1200, L"%ls\\master.mdb.update", dir);
+    wchar_t staged_state[1240];
+    swprintf(staged_state, 1240, L"%ls\\master.mdb.update.sync", dir);
     char hash[64] = "";
     if (get_master_hash(manifest_path, hash, 64) != 0){
         printf("清单库中找不到 master.mdb 的下载地址\n");
         return -1;
     }
-    printf("master.mdb 不存在，从服务器下载（约 15~20MB）...\n");
-    wchar_t path[512];
-    swprintf(path, 512, L"/dl/resources/Generic/%.2s/%s", hash, hash);
-    wchar_t lz4_file[1200];
-    swprintf(lz4_file, 1200, L"%ls\\master.mdb.lz4", dir);
-    if (http_get_file(CDN_HOST, path, lz4_file) != 0){
-        printf("下载 master.mdb 失败\n");
+    if (!valid_md5(hash)){
+        printf("清单中的 master.mdb 校验值无效\n");
         return -1;
     }
-    return lz4_to_file(lz4_file, hash, master_file);
+    int recovered = recover_master_sync(dir, master_file, staged_file,
+                                        staged_state, hash);
+    if (recovered < 0){
+        printf("无法读取 master.mdb；数据库可能正被占用，暂不重新下载\n");
+        return -1;
+    }
+    if (recovered > 0){
+        printf("master.mdb 更新标记已恢复\n");
+        return 0;
+    }
+    int staged_status = staged_master_matches(staged_file, staged_state, hash);
+    if (staged_status < 0){
+        printf("无法读取已暂存的 master.mdb；保留文件并稍后重试\n");
+        return -1;
+    }
+    if (staged_status > 0){
+        printf("发现已校验的数据库更新文件，重试覆盖...\n");
+    } else {
+        int sync_status = master_sync_matches(dir, master_file, hash);
+        if (sync_status < 0){
+            printf("无法读取 master.mdb；数据库可能正被占用，暂不重新下载\n");
+            return -1;
+        }
+        if (sync_status > 0){
+            printf("master.mdb 已与资源清单同步\n");
+            return 0;
+        }
+        DeleteFileW(staged_file);
+        DeleteFileW(staged_state);
+        printf("本地 master.mdb 与资源清单不一致，正在下载数据库...\n");
+        wchar_t path[512];
+        swprintf(path, 512, L"/dl/resources/Generic/%.2s/%s", hash, hash);
+        wchar_t lz4_file[1200];
+        swprintf(lz4_file, 1200, L"%ls\\master.mdb.lz4", dir);
+        if (http_get_file(CDN_HOST, path, lz4_file) != 0){
+            printf("下载 master.mdb 失败；保留原数据库\n");
+            return -1;
+        }
+        if (lz4_to_file(lz4_file, hash, staged_file) != 0) return -1;
+        if (!validate_master_db(staged_file)){
+            printf("下载的 master.mdb 结构校验失败；保留原数据库\n");
+            DeleteFileW(staged_file);
+            return -1;
+        }
+        char staged_hash[33];
+        if (md5_file(staged_file, staged_hash) != 0 ||
+            write_sync_state(staged_state, hash, staged_hash) != 0){
+            printf("无法记录暂存数据库校验状态；保留原数据库\n");
+            DeleteFileW(staged_file);
+            DeleteFileW(staged_state);
+            return -1;
+        }
+    }
+
+    if (!MoveFileExW(staged_file, master_file,
+                     MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)){
+        printf("覆盖 master.mdb 失败: %lu；保留原数据库和已校验更新文件，下次启动会重试\n",
+               (unsigned long)GetLastError());
+        return -1;
+    }
+    char file_hash[33] = "";
+    if (md5_file(master_file, file_hash) != 0){
+        printf("master.mdb 已替换，但无法读取校验值；保留恢复标记\n");
+        return -1;
+    }
+    if (write_master_sync(dir, hash, file_hash) != 0){
+        printf("master.mdb 已更新，但同步标记写入失败；下次启动会自动恢复\n");
+        return -1;
+    }
+    DeleteFileW(staged_state);
+    printf("master.mdb 已更新并通过 SQLite 完整性校验\n");
+    return 0;
 }
 
-int main(int argc, char **argv){
+int check_update_run(const wchar_t *requested_dir){
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);
 
     wchar_t dir[1024];
-    if (argc > 1){
-        MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, dir, 1024);
+    if (requested_dir && requested_dir[0]){
+        wcsncpy(dir, requested_dir, 1023);
+        dir[1023] = L'\0';
     } else {
         get_exe_dir(dir, 1024);
     }
@@ -485,6 +778,11 @@ int main(int argc, char **argv){
 
     wchar_t local_path[1200] = L"";
     long long local_ver = find_local_manifest(dir, local_path, 1200);
+    if (local_ver > 0 && !validate_manifest_db(local_path)){
+        printf("本地资源清单损坏，将尝试重新下载\n");
+        local_ver = 0;
+        local_path[0] = L'\0';
+    }
     if (local_ver > 0)
         printf("本地清单: manifest_%lld.db\n", local_ver);
     else
@@ -537,21 +835,84 @@ int main(int argc, char **argv){
         swprintf(path, 512, L"/dl/%lld/manifests/Android_AHigh_SHigh", latest);
         wchar_t lz4_file[1200], db_file[1200];
         swprintf(lz4_file, 1200, L"%ls\\manifest_%lld.db.lz4", dir, latest);
-        swprintf(db_file, 1200, L"%ls\\manifest_%lld.db", dir, latest);
+        swprintf(db_file, 1200, L"%ls\\manifest_%lld.db.pending", dir, latest);
         printf("下载清单库（11~15MB）...\n");
+        DeleteFileW(db_file);
         if (http_get_file(CDN_HOST, path, lz4_file) != 0){
             printf("下载清单库失败\n");
             return 1;
         }
         if (lz4_to_file(lz4_file, expect_hash, db_file) != 0)
             return 1;
+        if (!validate_manifest_db(db_file)){
+            printf("下载的资源清单结构校验失败\n");
+            DeleteFileW(db_file);
+            return 1;
+        }
         wcscpy(active_manifest, db_file);
     }
 
-    /* 3. master.mdb 不存在时自动补齐 */
-    if (ensure_master(dir, active_manifest) != 0)
+    if (!validate_manifest_db(active_manifest)){
+        printf("本地资源清单校验失败\n");
         return 1;
+    }
+
+    wchar_t master_file[1200], master_backup[1240];
+    swprintf(master_file, 1200, L"%ls\\master.mdb", dir);
+    swprintf(master_backup, 1240, L"%ls\\master.mdb.rollback.%lu",
+             dir, (unsigned long)GetCurrentProcessId());
+    int had_master = GetFileAttributesW(master_file) != INVALID_FILE_ATTRIBUTES;
+    int backup_created = 0;
+    if (local_ver < latest && had_master){
+        DeleteFileW(master_backup);
+        if (!CopyFileW(master_file, master_backup, TRUE)){
+            printf("备份本地 master.mdb 失败: %lu；保留原数据库\n",
+                   (unsigned long)GetLastError());
+            return 1;
+        }
+        backup_created = 1;
+    }
+
+    /* 3. master.mdb 不存在时自动补齐 */
+    if (ensure_master(dir, active_manifest) != 0){
+        if (backup_created) DeleteFileW(master_backup);
+        return 1;
+    }
+
+    if (local_ver < latest){
+        wchar_t pending[1200], final_path[1200];
+        swprintf(pending, 1200, L"%ls\\manifest_%lld.db.pending", dir, latest);
+        swprintf(final_path, 1200, L"%ls\\manifest_%lld.db", dir, latest);
+        if (!MoveFileExW(pending, final_path,
+                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)){
+            printf("安装新版资源清单失败: %lu\n", (unsigned long)GetLastError());
+            if (backup_created){
+                MoveFileExW(master_backup, master_file,
+                            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+            } else if (!had_master){
+                DeleteFileW(master_file);
+            }
+            wchar_t sync_file[1200];
+            swprintf(sync_file, 1200, L"%ls\\master.mdb.sync", dir);
+            DeleteFileW(sync_file);
+            return 1;
+        }
+        if (backup_created) DeleteFileW(master_backup);
+        wcscpy(active_manifest, final_path);
+    }
 
     printf("完成：清单库与主库均已就绪（程序会自动使用 %ls）。\n", active_manifest);
     return 0;
 }
+
+#ifndef CGSS_EMBED_CHECK_UPDATE
+int main(int argc, char **argv){
+    wchar_t dir[1024];
+    if (argc > 1){
+        if (!MultiByteToWideChar(CP_UTF8, 0, argv[1], -1, dir, 1024))
+            return 2;
+        return check_update_run(dir);
+    }
+    return check_update_run(NULL);
+}
+#endif

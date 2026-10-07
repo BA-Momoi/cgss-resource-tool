@@ -4,6 +4,7 @@
 int unpack_main(void);
 int unpack_fbx_main(void);
 int unpack_resources_main(void);
+int unpack_resources_path(const wchar_t *root, int interactive);
 void find_assetstudio(wchar_t *out, int n);
 void wipe_dir(const wchar_t *dir);
 int copy_dir(const wchar_t *outdir, const wchar_t *sub, const wchar_t *dest, const wchar_t *ext);

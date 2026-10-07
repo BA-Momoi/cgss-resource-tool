@@ -36,9 +36,16 @@ static void head_name(sqlite3 *rdb, int chara_id, int dress_id, char *out, int n
 
 /* 打印一张卡的模型资源名（物理/头部/身体/贴图），每条附带 hash
    card_id 卡片id  name 卡片名  chara_id 角色id  dress_id 服装id */
+static void print_card_identifiers(int card_id, const char *name, int chara_id, int dress_id){
+    printf("%d|%s | chara_id=%d", card_id, name, chara_id);
+    if (dress_id > 0) printf(" | dress_id=%d", dress_id);
+    printf("\n");
+}
+
 static void print_model_names(sqlite3 *rdb, int card_id, const char *name, int chara_id, int dress_id){
     char res[256];
-    printf("%d|%s模型名称\n", card_id, name);
+    print_card_identifiers(card_id, name, chara_id, dress_id);
+    printf("模型资源名称：\n");
     snprintf(res, sizeof res, "3d_chara_body_%04d.unity3d", dress_id);
     printf("物理：%s", res); print_res_hash(rdb, res); printf("\n");
     head_name(rdb, chara_id, dress_id, res, sizeof res);
@@ -73,14 +80,15 @@ static void query3d_model_by_card_id(sqlite3 *db, sqlite3 *rdb){
         }
         sqlite3_bind_int(stmt, 1, id);
         if (sqlite3_step(stmt) == SQLITE_ROW) {
+            int card_id = sqlite3_column_int(stmt, 0);
+            const char *name = (const char*)sqlite3_column_text(stmt, 1);
+            int chara_id = sqlite3_column_int(stmt, 2);
             int dress_id = sqlite3_column_int(stmt, 3);
             if (dress_id == 0) {
+                print_card_identifiers(card_id, name, chara_id, dress_id);
                 fprintf(stderr, "没有专属服装\n");
             } else {
-                print_model_names(rdb,
-                                  sqlite3_column_int(stmt, 0),
-                                  (const char*)sqlite3_column_text(stmt, 1),
-                                  sqlite3_column_int(stmt, 2), dress_id);
+                print_model_names(rdb, card_id, name, chara_id, dress_id);
             }
         } else {
             fprintf(stderr, "没有相关模型\n");
@@ -119,7 +127,7 @@ static void query3d_by_name(sqlite3 *db){
 
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db,
-            "SELECT id,name,rarity,open_dress_id FROM card_data WHERE name LIKE ? ORDER BY id",
+            "SELECT id,name,rarity,chara_id,open_dress_id FROM card_data WHERE name LIKE ? ORDER BY id",
             -1, &stmt, NULL) != SQLITE_OK) {
         fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(db));
         return;
@@ -127,11 +135,14 @@ static void query3d_by_name(sqlite3 *db){
     sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
     int n = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
-        printf("%d | %s | rarity（稀有度）=%d | dress（服饰id）=%d\n",
+        int dress_id = sqlite3_column_int(stmt, 4);
+        printf("%d | %s | rarity（稀有度）=%d | chara_id=%d",
                sqlite3_column_int(stmt, 0),
                sqlite3_column_text(stmt, 1),
                sqlite3_column_int(stmt, 2),
                sqlite3_column_int(stmt, 3));
+        if (dress_id > 0) printf(" | dress_id=%d", dress_id);
+        printf("\n");
         n++;
     }
     sqlite3_finalize(stmt);
@@ -150,7 +161,7 @@ static void query3d_by_chara(sqlite3 *db){
     }
     sqlite3_stmt *stmt = NULL;
     if (sqlite3_prepare_v2(db,
-            "SELECT id,name,rarity,open_dress_id FROM card_data WHERE chara_id=? ORDER BY id",
+            "SELECT id,name,rarity,chara_id,open_dress_id FROM card_data WHERE chara_id=? ORDER BY id",
             -1, &stmt, NULL) != SQLITE_OK) {
         fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(db));
         return;
@@ -158,11 +169,14 @@ static void query3d_by_chara(sqlite3 *db){
     sqlite3_bind_int(stmt, 1, chara_id);
     int n = 0;
     while (sqlite3_step(stmt) == SQLITE_ROW) {
-        printf("%d | %s | rarity（稀有度）=%d | dress（服饰id）=%d\n",
+        int dress_id = sqlite3_column_int(stmt, 4);
+        printf("%d | %s | rarity（稀有度）=%d | chara_id=%d",
                sqlite3_column_int(stmt, 0),
                sqlite3_column_text(stmt, 1),
                sqlite3_column_int(stmt, 2),
                sqlite3_column_int(stmt, 3));
+        if (dress_id > 0) printf(" | dress_id=%d", dress_id);
+        printf("\n");
         n++;
     }
     sqlite3_finalize(stmt);

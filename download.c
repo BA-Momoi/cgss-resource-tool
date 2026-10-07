@@ -9,6 +9,7 @@
 #include "util.h"
 #include "sticker.h"
 #include "paper.h"
+#include "stage_map.h"
 #define DB_PATH "master.mdb"
 
 typedef struct {
@@ -34,6 +35,9 @@ static int get_hash(sqlite3 *rdb, const char *name, char *hash_out, int n){
 
 static void add_item(sqlite3 *rdb, ResItem *items, int *n, const char *name, const wchar_t *sub){
     if (*n >= 64) return;
+    for (int i = 0; i < *n; i++)
+        if (strcmp(items[i].name, name) == 0 && wcscmp(items[i].sub, sub) == 0)
+            return;
     if (get_hash(rdb, name, items[*n].hash, 64) != 0){
         printf("清单中无 %s\n", name);
         return;
@@ -45,13 +49,18 @@ static void add_item(sqlite3 *rdb, ResItem *items, int *n, const char *name, con
 
 
 static void download_items(ResItem *items, int n, const wchar_t *wfolder){
+    if (n <= 0) return;
+    DlTask tasks[64];
+    wchar_t dirs[64][1024];
     for (int i = 0; i < n; i++){
-        wchar_t wsub[1024];
-        swprintf(wsub, 1024, L"%ls\\%ls", wfolder, items[i].sub);
-        mkdirs(wsub);
-        dl_one(items[i].name, items[i].hash, wsub);
+        swprintf(dirs[i], 1024, L"%ls\\%ls", wfolder, items[i].sub);
+        mkdirs(dirs[i]);
+        tasks[i].name = items[i].name;
+        tasks[i].hash = items[i].hash;
+        tasks[i].save_dir = dirs[i];
     }
-    printf("共 %d 个资源\n", n);
+    int succeeded = dl_many(tasks, (size_t)n);
+    printf("共下载 %d/%d 个资源\n", succeeded, n);
 }
 /* ================== 菜单2：卡片资源下载 ================== */
 
@@ -338,7 +347,10 @@ static int dl_song(sqlite3 *db, sqlite3 *rdb){
     printf("4.谱面\t5.舞台\t6.导演包(镜头/表情/阵型)\t7.全部\n");
     if (fgets(buf, sizeof buf, stdin) == NULL) return -1;
     int sel[64], nsel = parse_multi(buf, sel, 7);
-    if (nsel < 0){ nsel = 7; for (int i = 0; i < 7; i++) sel[i] = i + 1; }
+    if (nsel < 0 || selected(sel, nsel, 7)){
+        nsel = 6;
+        for (int i = 0; i < 6; i++) sel[i] = i + 1;
+    }
     if (nsel == 0) return -1;
 
     ResItem items[64];
@@ -394,11 +406,37 @@ static int dl_song(sqlite3 *db, sqlite3 *rdb){
                     snprintf(res, sizeof res, "musicscores_m%d.bdb", live_id);
                     add_item(rdb, items, &n, res, L"谱面");
                 }
-                if (selected(sel, nsel, 5) && live_bg > 0){
-                    snprintf(res, sizeof res, "3d_stage_%d.unity3d", live_bg);
-                    add_item(rdb, items, &n, res, L"舞台");
-                    snprintf(res, sizeof res, "3d_stage_%d_hq.unity3d", live_bg);
-                    add_item(rdb, items, &n, res, L"舞台");
+                if (selected(sel, nsel, 5)){
+                    static const struct {
+                        const char *format;
+                        const wchar_t *sub;
+                    } stage_packages[] = {
+                        {"3d_stage_%04d.unity3d", L"舞台"},
+                        {"3d_stage_%04d_hq.unity3d", L"舞台"},
+                        {"3d_stage_%04d_variable.unity3d", L"舞台"},
+                        {"3d_stage_%04d_variable_hq.unity3d", L"舞台"},
+                        {"3d_stage_%04d_variable_low.unity3d", L"舞台"}
+                    };
+                    int stage_bg = 0;
+                    if (!stage_bg_for_live(live_id, &stage_bg)){
+                        printf("live%d 没有 Master3dLive 舞台映射\n", live_id);
+                    } else {
+                        for (size_t i = 0; i < sizeof stage_packages / sizeof stage_packages[0]; i++){
+                            snprintf(res, sizeof res, stage_packages[i].format, stage_bg);
+                            add_item(rdb, items, &n, res, stage_packages[i].sub);
+                        }
+                    }
+                    if (live_bg > 0){
+                        static const char *backgrounds[] = {
+                            "live_bg2d_bg_live_%d.unity3d",
+                            "anime_fl_liv_2dbg_%d.unity3d",
+                            "anime_fl_liv_2dbg_%d_hq.unity3d"
+                        };
+                        for (size_t i = 0; i < sizeof backgrounds / sizeof backgrounds[0]; i++){
+                            snprintf(res, sizeof res, backgrounds[i], live_bg);
+                            add_item(rdb, items, &n, res, L"2D舞台背景");
+                        }
+                    }
                 }
             }
             sqlite3_finalize(lstmt);

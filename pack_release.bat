@@ -1,4 +1,5 @@
 @echo off
+setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -9,71 +10,154 @@ if not exist "%SEVENZIP%" (
     goto err
 )
 
-echo [1/4] configure Release static ...
+echo [1/6] configure Release static ...
 cmake -S . -B build_static -DCMAKE_BUILD_TYPE=Release -DCGSS_STATIC=ON
 if errorlevel 1 goto err
 
-echo [2/4] build Release CGSS_Script and usm ...
+echo [2/6] build Release CGSS_Script and usm ...
 cmake --build build_static --target CGSS_Script usm -j 8
 if errorlevel 1 goto err
 
-echo [3/4] assemble complete release directory ...
+echo [3/6] validate required release assets ...
+if not exist "build_static\CGSS_Script.exe" goto missing_main
+if not exist "build_static\usm.exe" goto missing_usm
+if not exist "spine_preview\preview.html" goto missing_preview
+if not exist "cgss_apply_textures.py" goto missing_blender_scripts
+if not exist "cgss_anim_to_shapekeys.py" goto missing_blender_scripts
+if not exist "README.txt" goto missing_readme
+if not exist "master.mdb" goto missing_master
+if not exist "stage_live_map.csv" goto missing_stage_map
+if not exist "ffmpeg.exe" goto missing_ffmpeg
+if not exist "build\acb2wavs.exe" goto missing_audio_tool
+if not exist "build\x64" goto missing_audio_runtime
+if not exist "build\x86" goto missing_audio_runtime
+
+set "HAVE_MANIFEST="
+for %%F in (manifest_*.db) do if exist "%%F" set "HAVE_MANIFEST=1"
+if not defined HAVE_MANIFEST goto missing_manifest
+
+set "HAVE_DLL="
+for %%F in (build\*.dll) do if exist "%%F" set "HAVE_DLL=1"
+if not defined HAVE_DLL goto missing_audio_dlls
+
+set "ASSETSTUDIO_SOURCE="
+if exist "AssetStudio\AssetStudio.CLI.exe" set "ASSETSTUDIO_SOURCE=AssetStudio"
+if not defined ASSETSTUDIO_SOURCE if exist "build\AssetStudio\AssetStudio.CLI.exe" set "ASSETSTUDIO_SOURCE=build\AssetStudio"
+if not defined ASSETSTUDIO_SOURCE goto missing_assetstudio
+
+set "STAGE="
+:new_stage
+set "STAGE=%TEMP%\CGSS_ResourceTool_%RANDOM%_%RANDOM%"
+if exist "%STAGE%" goto new_stage
+set "PACKAGE=%STAGE%\CGSS_ResourceTool"
+mkdir "%PACKAGE%"
+if errorlevel 1 goto err
+
+echo [4/6] assemble a clean, portable release ...
+copy /y "build_static\CGSS_Script.exe" "%PACKAGE%\CGSS_Script.exe" >nul
+if errorlevel 1 goto err
+copy /y "build_static\usm.exe" "%PACKAGE%\usm.exe" >nul
+if errorlevel 1 goto err
+xcopy /E /Y /I "build_static\spine_preview" "%PACKAGE%\spine_preview" >nul
+if errorlevel 1 goto err
+copy /y "cgss_apply_textures.py" "%PACKAGE%\" >nul
+if errorlevel 1 goto err
+copy /y "cgss_anim_to_shapekeys.py" "%PACKAGE%\" >nul
+if errorlevel 1 goto err
+copy /y "README.txt" "%PACKAGE%\README.txt" >nul
+if errorlevel 1 goto err
+copy /y "ffmpeg.exe" "%PACKAGE%\ffmpeg.exe" >nul
+if errorlevel 1 goto err
+copy /y "master.mdb" "%PACKAGE%\master.mdb" >nul
+if errorlevel 1 goto err
+copy /y "stage_live_map.csv" "%PACKAGE%\stage_live_map.csv" >nul
+if errorlevel 1 goto err
+copy /y manifest_*.db "%PACKAGE%\" >nul
+if errorlevel 1 goto err
+if exist "master.mdb.sync" copy /y "master.mdb.sync" "%PACKAGE%\master.mdb.sync" >nul
+xcopy /E /Y /I "%ASSETSTUDIO_SOURCE%" "%PACKAGE%\AssetStudio" >nul
+if errorlevel 1 goto err
+copy /y "build\acb2wavs.exe" "%PACKAGE%\acb2wavs.exe" >nul
+if errorlevel 1 goto err
+for %%F in (build\*.dll) do if exist "%%F" copy /y "%%F" "%PACKAGE%\" >nul
+xcopy /E /Y /I "build\x64" "%PACKAGE%\x64" >nul
+if errorlevel 1 goto err
+xcopy /E /Y /I "build\x86" "%PACKAGE%\x86" >nul
+if errorlevel 1 goto err
+
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%~dp0bundle_dotnet_runtime.ps1" -Destination "%PACKAGE%\dotnet"
+if errorlevel 1 goto err
+
 if not exist "release" mkdir "release"
-if not exist "release\CGSS_ResourceTool" mkdir "release\CGSS_ResourceTool"
-
-copy /y build_static\CGSS_Script.exe "release\CGSS_ResourceTool\CGSS_Script.exe" >nul
-if errorlevel 1 (
-    echo ERROR: cannot replace CGSS_Script.exe. Close the running program and retry.
-    goto err
-)
-copy /y build_static\usm.exe "release\CGSS_ResourceTool\usm.exe" >nul
-if errorlevel 1 (
-    echo ERROR: cannot copy usm.exe.
-    goto err
-)
-xcopy /E /Y /I build_static\spine_preview "release\CGSS_ResourceTool\spine_preview" >nul
-copy /y cgss_apply_textures.py "release\CGSS_ResourceTool\" >nul
-copy /y cgss_anim_to_shapekeys.py "release\CGSS_ResourceTool\" >nul
-copy /y README.txt "release\CGSS_ResourceTool\README.txt" >nul
-if exist ffmpeg.exe copy /y ffmpeg.exe "release\CGSS_ResourceTool\ffmpeg.exe" >nul
-
-rem The release folder may be empty after a fresh checkout. Refill optional
-rem runtime assets from the build output when they are available.
-if exist "AssetStudio\AssetStudio.CLI.exe" (
-    xcopy /E /Y /I "AssetStudio" "release\CGSS_ResourceTool\AssetStudio" >nul
-) else if exist "build\AssetStudio\AssetStudio.CLI.exe" (
-    xcopy /E /Y /I "build\AssetStudio" "release\CGSS_ResourceTool\AssetStudio" >nul
-) else (
-    echo WARNING: AssetStudio not found; model/sticker parsing will be unavailable.
-)
-
-if exist master.mdb copy /y master.mdb "release\CGSS_ResourceTool\master.mdb" >nul
-for %%F in (manifest_*.db) do if exist "%%F" copy /y "%%F" "release\CGSS_ResourceTool\" >nul
-if exist "build\acb2wavs.exe" copy /y "build\acb2wavs.exe" "release\CGSS_ResourceTool\acb2wavs.exe" >nul
-rem acb2wavs is a managed tool and needs the companion VGAudio/DereTore/
-rem SharpDX assemblies beside the executable, not only LZ4.dll.
-for %%F in (build\*.dll) do if exist "%%F" copy /y "%%F" "release\CGSS_ResourceTool\" >nul
-if exist "build\x64" xcopy /E /Y /I "build\x64" "release\CGSS_ResourceTool\x64" >nul
-if exist "build\x86" xcopy /E /Y /I "build\x86" "release\CGSS_ResourceTool\x86" >nul
-
-if not exist "release\CGSS_ResourceTool\master.mdb" echo WARNING: master.mdb not found; data lookup will be unavailable.
-if not exist "release\CGSS_ResourceTool\manifest_*.db" echo WARNING: manifest database not found; downloads will be unavailable.
-
-echo [4/4] repack CGSS_ResourceTool.zip ...
-del /q release\CGSS_ResourceTool.zip 2>nul
-pushd release
-"%SEVENZIP%" a -tzip -y CGSS_ResourceTool.zip CGSS_ResourceTool -xr!CGSS_ResourceTool\CGSS_DOWN -xr!CGSS_ResourceTool\AssetStudio_out -xr!CGSS_ResourceTool\spine_preview\__pycache__ -x!CGSS_ResourceTool\AssetStudio\log.txt -x!CGSS_ResourceTool\AssetStudio\log_prev.txt -x!CGSS_ResourceTool\check_update.exe -xr!*.pdb
+if errorlevel 1 goto err
+pushd "%STAGE%"
+"%SEVENZIP%" a -tzip -y "CGSS_ResourceTool.zip" "CGSS_ResourceTool" -x!CGSS_ResourceTool\AssetStudio\log.txt -x!CGSS_ResourceTool\AssetStudio\log_prev.txt -xr!*.pdb
 set "ZIP_RC=%errorlevel%"
 popd
 if not "%ZIP_RC%"=="0" goto err
 
+echo [5/6] replace the release archive after it is complete ...
+move /Y "%STAGE%\CGSS_ResourceTool.zip" "%CD%\release\CGSS_ResourceTool.zip" >nul
+if errorlevel 1 goto err
+
+echo [6/6] refresh the unpacked release files ...
+pushd "release"
+"%SEVENZIP%" x -y "CGSS_ResourceTool.zip" >nul
+set "EXTRACT_RC=%errorlevel%"
+popd
+if not "%EXTRACT_RC%"=="0" echo WARNING: the ZIP is ready, but the unpacked release folder could not be refreshed.
+
+rmdir /S /Q "%STAGE%"
+set "STAGE="
+
 echo.
 echo ===== DONE =====
-dir /-c release\CGSS_ResourceTool.zip | findstr /i "zip"
+dir /-c "%CD%\release\CGSS_ResourceTool.zip" | findstr /i "zip"
 pause
 exit /b 0
 
+:missing_main
+echo ERROR: CGSS_Script.exe was not produced.
+goto err
+:missing_usm
+echo ERROR: usm.exe was not produced.
+goto err
+:missing_preview
+echo ERROR: spine_preview\preview.html is missing.
+goto err
+:missing_blender_scripts
+echo ERROR: required Blender scripts are missing.
+goto err
+:missing_readme
+echo ERROR: README.txt is missing.
+goto err
+:missing_master
+echo ERROR: master.mdb is required for a full release.
+goto err
+:missing_stage_map
+echo ERROR: stage_live_map.csv is required for exact 3D stage lookup.
+goto err
+:missing_manifest
+echo ERROR: manifest_*.db is required for downloads.
+goto err
+:missing_assetstudio
+echo ERROR: AssetStudio.CLI.exe is required for model and Spine extraction.
+goto err
+:missing_ffmpeg
+echo ERROR: ffmpeg.exe is required for video conversion.
+goto err
+:missing_audio_tool
+echo ERROR: build\acb2wavs.exe is required for audio decoding.
+goto err
+:missing_audio_runtime
+echo ERROR: build\x64 and build\x86 are required for audio decoding.
+goto err
+:missing_audio_dlls
+echo ERROR: build\*.dll dependencies are required for audio decoding.
+goto err
+
 :err
+if defined STAGE if exist "%STAGE%" rmdir /S /Q "%STAGE%"
 echo.
 echo ===== BUILD FAILED, see messages above =====
 pause

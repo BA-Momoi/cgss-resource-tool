@@ -2,7 +2,8 @@
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
-<title>CGSS 卡面Spine动画预览（Spine 3.6 / JSON）</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CGSS Spine动画预览</title>
 <style>
   body { font-family: "Microsoft YaHei", sans-serif; background:#222; color:#eee; padding:16px; }
   h1 { font-size:18px; }
@@ -10,12 +11,13 @@
   label { display:inline-block; width:130px; }
   canvas { background:#333; border:1px solid #555; display:block; margin-top:12px; max-width:100%; }
   select, button { padding:4px 8px; }
+  #anim_rows label { width:auto; max-width:100%; overflow-wrap:anywhere; margin-right:8px; }
   #msg { color:#f80; white-space:pre-wrap; }
   #fps { color:#8f8; }
 </style>
 </head>
 <body>
-<h1>CGSS 卡面Spine动画预览（数据版本 3.6）</h1>
+<h1>CGSS Spine动画预览</h1>
 <p>用法：<br>
 <b>卡面Spina动画</b>（角色目录\卡面Spina动画\spine 下）：骨架把 5 个都选上（SP3S{卡id}_bg / _chara / _eff1 / _eff2 / _fg 的 .skel 或 .skel.asset，页面自动转 JSON），图集选 SP3S{卡id}_tex.atlas(.asset)，贴图选 tex.png + tex_A8.png（A8 是透明通道，自动合成去黑边）。<br>
 <b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json / SPSprachen_N.json（<b>老卡用 N、新卡用 s</b>，拿不准两个都试，头身比例正常的是对的），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。人物左右反了就用下面的「左右镜像(flip)」勾选框切换。<br>
@@ -54,8 +56,60 @@ try { var _m = /[?&]ss=(\d+)/.exec(location.search); if (_m) SS = parseInt(_m[1]
 var offCanvas = null, offRenderer = null;
 var glCanvas = null, glRenderer = null;
 var expGL = null, expGLCanvas = null;
+var frameId = null, previewReady = false;
+var loadVersion = { skel: 0, atlas: 0, png: 0 };
+var loading = { skel: false, atlas: false, png: false };
+var loadErrors = { skel: '', atlas: '', png: '' };
 
 function msg(s){ document.getElementById('msg').textContent = s; }
+function fileStatus(s){
+  var error = loadErrors.skel || loadErrors.atlas || loadErrors.png;
+  msg(error || s);
+}
+function resetPreview(){
+  previewReady = false;
+  if (frameId !== null) cancelAnimationFrame(frameId);
+  frameId = null;
+  renderer = null;
+  if (glRenderer && glRenderer.dispose) glRenderer.dispose();
+  glRenderer = null; glCanvas = null;
+  document.getElementById('anim_rows').innerHTML = '';
+  document.getElementById('fps').textContent = '';
+  var canvas = document.getElementById('cv'), ctx = canvas.getContext('2d');
+  ctx.setTransform(1,0,0,1,0,0);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+}
+function skeletonText(ab, name){
+  var bytes = new Uint8Array(ab), obj;
+  if (!bytes.length) throw new Error('骨架文件为空：' + name);
+  if (bytes[0] === 0x1c) {
+    obj = CGSSSkelParser.parse(ab);
+  } else {
+    var text;
+    try { text = new TextDecoder('utf-8', { fatal: true }).decode(ab); }
+    catch(e){ throw new Error('无法识别骨架文件：' + name); }
+    try { obj = JSON.parse(text); }
+    catch(e){ throw new Error('文件 "' + name + '" 不是骨架 JSON 或 CGSS 二进制骨架。'); }
+  }
+  if (!obj || !Array.isArray(obj.bones) || !obj.bones.length)
+    throw new Error('文件 "' + name + '" 缺少骨架数据。');
+  return JSON.stringify(obj);
+}
+function validatedAtlasText(ab, name){
+  var bytes = new Uint8Array(ab);
+  if (bytes.length && bytes[0] === 0x1c)
+    throw new Error('图集栏选中了二进制骨架 "' + name + '"。骨架应放在骨架栏；图集请选择 SPC{卡id}.atlas(.asset) 或 SP3S{卡id}_tex.atlas(.asset)。');
+  var text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(ab); }
+  catch(e){ throw new Error('文件 "' + name + '" 不是文本图集。'); }
+  if (/[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(text) || /^\s*[\[{]/.test(text))
+    throw new Error('文件 "' + name + '" 不是 Spine 图集，请选择 .atlas 或 .atlas.asset。');
+  try {
+    var atlas = new spine.TextureAtlas(text, function(){ return new spine.FakeTexture({ width: 1, height: 1 }); });
+    if (!atlas.pages.length || !atlas.regions.length) throw new Error('empty atlas');
+  } catch(e){ throw new Error('图集 "' + name + '" 格式无效或内容不完整。'); }
+  return text;
+}
 
 // 小人骨架（SPSprachen）用 flip 骨骼控制左右镜像。
 // 勾选 = scaleX -1（默认），不勾选 = 数据原样 scaleX 1。
@@ -65,33 +119,27 @@ function applyPetitFlip(s){
 }
 
 document.getElementById('f_skel').addEventListener('change', function(e){
+  resetPreview();
   skelList = [];
+  loadErrors.skel = '';
   var files = Array.prototype.slice.call(e.target.files);
-  var pending = files.length;
-  files.forEach(function(f){
-    f.arrayBuffer().then(function(ab){
-      var head = new Uint8Array(ab, 0, 4);
-      var first = String.fromCharCode(head[0]);
-      var looksJson = first === '{' || first === ' ' || first === '\t' || first === '\r' || first === '\n' || first === 'S' || first === 's';
-      if (!looksJson) {
-        // CGSS 二进制 skel（0x1C 头）或 .skel.asset：按二进制解析
-        var obj = CGSSSkelParser.parse(ab);
-        skelList.push({ name: f.name, text: JSON.stringify(obj) });
-        if (--pending === 0) { finishSkelLoad(files.length); }
-      } else {
-        var text = new TextDecoder('utf-8').decode(ab);
-        try {
-          var obj = JSON.parse(text);
-          if (!obj || !obj.bones) throw new Error('not skeleton json');
-        } catch (e1) {
-          msg('文件 "' + f.name + '" 不是骨架文件（JSON 解析失败）。\n小人请把 骨架 选 SPSprachen_s.json，图集选 SPC{id}.atlas(.asset)，贴图选 SPC{id}.png');
-          if (--pending === 0) { finishSkelLoad(files.length); }
-          return;
-        }
-        skelList.push({ name: f.name, text: text });
-        if (--pending === 0) { finishSkelLoad(files.length); }
-      }
-    }).catch(function(err){ msg('读取 ' + f.name + ' 失败：' + err.message); });
+  var version = ++loadVersion.skel;
+  loading.skel = files.length > 0;
+  if (!files.length) { fileStatus('未选择骨架'); return; }
+  Promise.all(files.map(function(f){
+    return f.arrayBuffer().then(function(ab){
+      return { name: f.name, text: skeletonText(ab, f.name) };
+    });
+  })).then(function(list){
+    if (version !== loadVersion.skel) return;
+    loading.skel = false;
+    skelList = list;
+    finishSkelLoad(list.length);
+  }).catch(function(err){
+    if (version !== loadVersion.skel) return;
+    loading.skel = false;
+    loadErrors.skel = '读取骨架失败：' + err.message;
+    fileStatus('');
   });
 });
 function finishSkelLoad(n){
@@ -120,23 +168,58 @@ function finishSkelLoad(n){
       hint = isN ? '（检测到 N 骨架：老卡用）' : '（检测到 s 骨架：新卡用）';
     }
   } catch(e){}
-  msg('已选骨架 ' + n + ' 个（已按图层排序）' + hint);
+  fileStatus('已选骨架 ' + n + ' 个（已按图层排序）' + hint);
   tryInit();
 }
 document.getElementById('f_atlas').addEventListener('change', function(e){
+  resetPreview();
+  atlasText = null;
+  loadErrors.atlas = '';
+  var version = ++loadVersion.atlas;
   var f = e.target.files[0];
-  if (!f) return;
-  f.text().then(function(t){ atlasText = t; msg('已选图集：' + f.name); tryInit(); });
+  loading.atlas = !!f;
+  if (!f) { fileStatus('未选择图集'); return; }
+  f.arrayBuffer().then(function(ab){
+    if (version !== loadVersion.atlas) return;
+    atlasText = validatedAtlasText(ab, f.name);
+    loading.atlas = false;
+    fileStatus('已选图集：' + f.name);
+    tryInit();
+  }).catch(function(err){
+    if (version !== loadVersion.atlas) return;
+    loading.atlas = false;
+    loadErrors.atlas = err.message;
+    fileStatus('');
+  });
 });
 document.getElementById('f_png').addEventListener('change', function(e){
+  resetPreview();
   pngMap = {};
   compositeMap = {};
+  loadErrors.png = '';
+  var version = ++loadVersion.png;
   var files = Array.prototype.slice.call(e.target.files);
-  var pending = files.length;
-  files.forEach(function(f){
-    var img = new Image();
-    img.onload = function(){ pngMap[f.name] = img; if (--pending === 0) { buildComposite(); msg('已选贴图 ' + files.length + ' 个'); tryInit(); } };
-    img.src = URL.createObjectURL(f);
+  loading.png = files.length > 0;
+  if (!files.length) { fileStatus('未选择贴图'); return; }
+  Promise.all(files.map(function(f){
+    return new Promise(function(resolve, reject){
+      var img = new Image(), url = URL.createObjectURL(f);
+      img.onload = function(){ URL.revokeObjectURL(url); resolve({ name: f.name, image: img }); };
+      img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('贴图无法读取：' + f.name)); };
+      img.src = url;
+    });
+  })).then(function(images){
+    if (version !== loadVersion.png) return;
+    loading.png = false;
+    images.forEach(function(entry){ pngMap[entry.name] = entry.image; });
+    buildComposite();
+    fileStatus('已选贴图 ' + files.length + ' 个');
+    tryInit();
+  }).catch(function(err){
+    if (version !== loadVersion.png) return;
+    loading.png = false;
+    loadErrors.png = err.message;
+    fileStatus('');
   });
 });
 
@@ -161,6 +244,7 @@ function buildComposite(){
 }
 
 function tryInit(){
+  if (loading.skel || loading.atlas || loading.png || loadErrors.skel || loadErrors.atlas || loadErrors.png) return;
   if (!skelList.length || !atlasText || !Object.keys(pngMap).length) return;
   try {
     var canvas = document.getElementById('cv');
@@ -273,16 +357,18 @@ function tryInit(){
       fit.scale = 1; fit.tx = canvas.width / 2; fit.ty = canvas.height / 2;
     }
     msg('加载成功：' + skelList.length + ' 个骨架（自动适配画面）');
+    previewReady = true;
     last = performance.now();
-    requestAnimationFrame(loop);
+    frameId = requestAnimationFrame(loop);
   } catch (err) {
+    resetPreview();
     msg('加载失败：' + err.message + '\n' + (err.stack || ''));
   }
 }
 
 function loop(t){
-  requestAnimationFrame(loop);
-  if (!skelList.length || !playing) return;
+  frameId = requestAnimationFrame(loop);
+  if (!previewReady || !playing) return;
   var dt = Math.min(0.05, (t - last) / 1000);
   last = t;
   var sp = parseFloat(document.getElementById('speed').value) || 1;
@@ -382,7 +468,7 @@ function exportMp4Name(){
 }
 
 function exportMP4(){
-  if (!skelList.length){ msg('请先加载骨架'); return; }
+  if (!previewReady){ msg('请先成功加载骨架、图集和贴图'); return; }
   if (!window.VideoEncoder || !window.VideoFrame){ msg('当前浏览器不支持 WebCodecs，无法导出 MP4（请用新版 Chrome/Edge）'); return; }
   if (typeof Mp4Muxer === 'undefined'){ msg('缺少 mp4-muxer.min.js'); return; }
   var b = exportBounds();

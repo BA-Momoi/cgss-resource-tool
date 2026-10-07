@@ -6,9 +6,8 @@ CGSS（偶像大师 灰姑娘女孩 星光舞台）资源查询、下载、解�
 
 C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不需要安装任何运行库
 > [!IMPORTANT]
-> (本项目已知问题)在歌曲,舞台菜单中下载的舞台unity3d资源均为错误资源        
->       需解包相关功能请确保将AS放置在同目录和安装NET7
-> https://builds.dotnet.microsoft.com/dotnet/WindowsDesktop/7.0.20/windowsdesktop-runtime-7.0.20-win-x64.exe
+> 舞台资源按歌曲的 live 背景映射查找；若清单没有对应的 3D 舞台包，列表会明确显示可用的 2D 背景资源。
+> 完整发布包已附带 AssetStudio 和 .NET 7 运行时；无需额外安装 .NET。
 > 游戏相关资源及内容的著作权归 BANDAI NAMCO Entertainment Inc. 所有。
 > 本工具仅用于学习交流，请勿用于商业用途；下载、解包的内容请在 24 小时内删除。
 
@@ -71,22 +70,32 @@ C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不
    - `CGSS_ResourceTool_nodb.zip`：精简版，不含数据库（见下文）
 2. 解压后把 `CGSS_Script.exe`、`master.mdb`、`manifest_*.db` 放在同一目录
 3. 双击 `CGSS_Script.exe` 即可使用
-> 请确保你的网络环境可以正常访问github，程序运行会向github获取最新版本号以判断是否更新
-> 游戏已停止更新新内容，数据库即为最终版本（资源版本 10133800），
-> 资源查询与下载不受影响。
+程序启动时会检查资源清单版本，并自动下载、校验后覆盖同目录的 `master.mdb`。若网络不可用或更新失败，会保留本地数据库继续启动。数据库同步使用游戏资源数据站，不依赖 GitHub；GitHub 只用于检查程序发布版本。
 
-### check_update.exe（暂时弃用）
+## 命令行参数
 
-负责检查 / 补齐数据库的小工具，精简版（_nodb）用户必看：
+```text
+CGSS_Script.exe --help
+CGSS_Script.exe --version
+CGSS_Script.exe --browse
+CGSS_Script.exe --download
+CGSS_Script.exe --unpack "D:/CGSS_DOWN/角色目录"
+CGSS_Script.exe --preview
+CGSS_Script.exe --unpack-usm
+CGSS_Script.exe --auto-update
+```
 
-- 自动扫描同目录的 `manifest_*.db` 并选择最新版本
-- 联网查询最新资源版本（starlight.kirara.ca 数据源）
-- 不是最新版时自动下载、MD5 校验、LZ4 解压并写入新库
-- 同目录没有 `master.mdb` 时，自动从清单库读出下载地址并一并补齐
-  （完整包已含两个库，运行时会显示「已是最新 / 已存在」）
-> [!IMPORTANT]
-> v1.51版本后check_updata.exe在部分设备可能无法正常运行
-> 在修复之前nodb版将停止上传
+`--browse` 和 `--download` 打开资源查找与下载菜单。`--unpack <目录>` 解包目录中的普通角色资源（卡面、背景、Spine 等）；3D 模型 Unity 包必须从主菜单“解包 → 模型解包为 FBX”处理，它会调用 AssetStudio 并导出 FBX、动画和布料 JSON。命令行参数错误或操作失败时会返回非零退出码。
+
+### 数据库自动同步(beta)
+
+主程序启动时会：
+
+- 检查同目录的 `manifest_*.db`，下载并校验新版本
+- 按新清单下载 `master.mdb`，校验后覆盖本地数据库
+- 网络或校验失败时保留旧库并继续启动
+
+`check_update.exe` 也可以单独构建，用于手动检查与同步数据库。
 
 
 ---
@@ -138,7 +147,7 @@ CGSS/
 ├── cgss_anim_to_shapekeys.py   Blender 形态键脚本
 ├── CMakeLists.txt              构建配置
 ├── ffmpeg.exe                  视频转换（第三方，不入库，发布包自带）
-├── master.mdb / manifest_10133800.db   游戏数据库（不在仓库内，自行准备）
+├── master.mdb / manifest_*.db          游戏数据库（本地文件，不纳入仓库）
 ├── 记录.md                     备忘录差不多
 └── README.md                   本文档
 ```
@@ -170,12 +179,11 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 
 ## 依赖说明
 
-- 数据库：从游戏客户端提取的 `master.mdb`（主库）和 `manifest_10133800.db`（资源清单）。
-  完整发布包已包含
-- NET7环境（可选）
-- 一个可以良好访问Github的网络环境
+- 数据库：完整包附带 `master.mdb` 和 `manifest_*.db`；主程序在线启动时会自动同步。
+- 完整发布包附带本地 .NET 7 Core / Windows Desktop Runtime；直接解压使用，无需另装 .NET
+- 网络：数据库同步访问游戏资源数据站；程序版本检查访问 GitHub。
 - 第三方库:miniz 
-- 除USM的解包：RazTools的魔改AssetStudio（.NET 7 程序，需要安装 .NET 7 Desktop Runtime）
+- 除USM的解包：RazTools的魔改AssetStudio（完整发布包附带本地 .NET 7 运行时）
 - 语音解码：deretore-toolkit 的 `acb2wavs.exe` 及同目录 DLL
 - Blender 脚本（可选）：
   - `cgss_apply_textures.py`：FBX 在 Blender 里自动贴图 + 糙度 = 1
@@ -186,16 +194,20 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 
 ## 常见问题
 
-- 解包报「启动 AssetStudio.CLI 失败」：安装 .NET 7 Desktop Runtime
-- 更新失败：确保有权创造新文件夹，能正常访问Github，如果都没用就手动去Release下载并替换吧，有能力顺便提交个issue
+- 解包报「启动 AssetStudio.CLI 失败」：确认发布包内 `dotnet/` 与 `AssetStudio/` 文件完整，并检查安全软件是否隔离文件
+- 数据库更新失败：程序会保留本地数据库继续启动；确认能访问游戏资源数据站后重试
+- 程序版本更新失败：确认能访问 GitHub，或手动下载 Release 替换程序
 - 语音解码无输出：确认 `acb2wavs.exe` 和同目录 DLL 未被杀毒软件删除
-- 找不到数据库：`master.mdb`、`manifest_*.db` 与 exe 同目录即可；
-  `_nodb` 版请自行准备数据库，或运行一次 `check_update.exe` 获取清单库
+- 找不到数据库：联网启动时主程序会自动获取清单和主库；离线使用时需在 exe 同目录提供 `master.mdb` 与 `manifest_*.db`
 - CLI 导出的 FBX 身体没有贴图：带贴图的 body_FBX 需用 GUI 导出
   （解包菜单内有详细步骤）
 - 选择解包后没有解出所需文件：确保 exe 同目录包含了AssetStudio
 
 ---
+
+## 目前已知问题
+- 在使用脚本的自动解包3D模型导出FBX,在blender使用项目中的脚本将Unity动画转为形态键时,部分角色会有缺少和错误的形态键
+- 某些卡面在Spine预览会存在部分图层缺失
 
 ## 版本历史
 
@@ -204,6 +216,13 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 小更新（修 bug / 小功能）：版本号 +0.01，如 1.3 → 1.31 → 1.32
 - 大更新（新功能模块 / 较大改动）：版本号 +0.1，如 1.3 → 1.4 → 1.5
 - 超大更新（如新增 GUI 等大改版）：主版本 +1，如 1.x → 2.0
+
+### v1.7(2026-10-7)
+- 新增传参(试验版)
+- 修复了下载舞台,歌曲,自由搜索的某些资源返回/下载错误
+- 在3D模型选择菜单新增角色Id和服装Id的显示
+- 将.NET 7 Core / Windows Desktop Runtime集成在reles里方便使用
+- 模型预览Spine小人时选择错误会有更加直观的报错提醒
 
 ### v1.61(2026-8-28)
 - 新增自动更新，主程序启动时访问github获取最新版本号，如有新版本，则可以选择自动更新

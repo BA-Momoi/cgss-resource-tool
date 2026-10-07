@@ -14,16 +14,20 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <windows.h>
+#include <conio.h>
 #include "sqlite3.h"
 #include "paper.h"
 #include "net.h"
 #include "util.h"
 #include "cg.h"
 #include "sticker.h"
+#include "stage_map.h"
 
 #define DB_PATH "master.mdb"
 #define MAX_ITEMS 1024
+#define DOWNLOAD_BATCH_SIZE 64
 
 /* 一条可下载资源 */
 typedef struct {
@@ -50,21 +54,27 @@ static int get_hash(sqlite3 *rdb, const char *name, char *hash_out, int n){
 }
 
 /* 已知资源名 -> 加入待选列表(清单里没有就提示跳过) */
-static void add_res(sqlite3 *rdb, BItem *items, int *n,
-                    const char *name, const wchar_t *sub){
-    if (*n >= MAX_ITEMS) return;
+static int add_res(sqlite3 *rdb, BItem *items, int *n,
+                   const char *name, const wchar_t *sub){
+    if (*n >= MAX_ITEMS) return 0;
+    for (int i = 0; i < *n; i++)
+        if (strcmp(items[i].name, name) == 0 && wcscmp(items[i].sub, sub) == 0)
+            return 0;
     if (get_hash(rdb, name, items[*n].hash, 64) != 0){
         printf("清单中无 %s\n", name);
-        return;
+        return 0;
     }
     snprintf(items[*n].name, sizeof items[*n].name, "%s", name);
     snprintf(items[*n].disp, sizeof items[*n].disp, "%s", name);
     wcscpy(items[*n].sub, sub);
     (*n)++;
+    return 1;
 }
 
 /* 把待选列表转成 pager 用的 dbdef 数组(tmp 需要 n+1 项, 最后一行 END) */
 static void make_menu(dbdef *tmp, BItem *items, int n){
+    if (n < 0) n = 0;
+    if (n > MAX_ITEMS) n = MAX_ITEMS;
     for (int i = 0; i < n; i++){
         snprintf(tmp[i].name, sizeof tmp[i].name, "%s", items[i].disp);
         tmp[i].func = NULL;
@@ -90,7 +100,7 @@ static int is_sticker_resource(const char *name)
 }
 
 /* 下载一条到 wroot\sub；贴纸下载成功后立即进入统一后处理流程。 */
-static void download_item(const BItem *it, const wchar_t *wroot){
+static int download_item(const BItem *it, const wchar_t *wroot){
     wchar_t wsub[1300];
 
     if (is_sticker_resource(it->name)) {
@@ -105,22 +115,78 @@ static void download_item(const BItem *it, const wchar_t *wroot){
         mkdirs(spine_dir);
         mkdirs(png_dir);
 
-        printf("下载 %s ...\n", it->name);
         if (dl_one(it->name, it->hash, raw_dir) == 0) {
             sticker_unpack_file(it->name, raw_dir, spine_dir, png_dir, 0);
+            return 0;
         }
-        return;
+        return -1;
     }
 
     swprintf(wsub, 1300, L"%ls\\%ls", wroot, it->sub);
     mkdirs(wsub);
-    printf("下载 %s ...\n", it->name);
-    dl_one(it->name, it->hash, wsub);
+    return dl_one(it->name, it->hash, wsub);
+}
+
+static int download_selected(BItem *items, const int *picked, int count,
+                             const wchar_t *wroot){
+    if (count <= 0) return 0;
+    int succeeded = 0;
+    for (int base = 0; base < count; base += DOWNLOAD_BATCH_SIZE){
+        int batch_count = count - base;
+        if (batch_count > DOWNLOAD_BATCH_SIZE) batch_count = DOWNLOAD_BATCH_SIZE;
+        DlTask tasks[DOWNLOAD_BATCH_SIZE];
+        wchar_t dirs[DOWNLOAD_BATCH_SIZE][1300];
+        int stickers[DOWNLOAD_BATCH_SIZE];
+        int ntasks = 0, nsticker = 0;
+
+        for (int i = 0; i < batch_count; i++){
+            int index = picked ? picked[base + i] : base + i;
+            BItem *item = &items[index];
+            if (is_sticker_resource(item->name)){
+                stickers[nsticker++] = index;
+                continue;
+            }
+            swprintf(dirs[ntasks], 1300, L"%ls\\%ls", wroot, item->sub);
+            mkdirs(dirs[ntasks]);
+            tasks[ntasks].name = item->name;
+            tasks[ntasks].hash = item->hash;
+            tasks[ntasks].save_dir = dirs[ntasks];
+            ntasks++;
+        }
+
+        if (ntasks){
+            int rc = dl_many(tasks, (size_t)ntasks);
+            if (rc > 0) succeeded += rc;
+        }
+        for (int i = 0; i < nsticker; i++)
+            if (download_item(&items[stickers[i]], wroot) == 0) succeeded++;
+    }
+    return succeeded;
 }
 
 /* 下面几个类别要复用"选歌曲/选卡片", 先声明(定义在后面) */
 static int choose_songs(sqlite3 *db, int *ids, int max);
 static int choose_cards(sqlite3 *db, int *ids, int max);
+static int choose_model_cards(sqlite3 *db, int *ids, int max);
+
+static int is_decimal_id(const char *value){
+    if (!value || !value[0]) return 0;
+    for (const unsigned char *p = (const unsigned char*)value; *p; p++)
+        if (!isdigit(*p)) return 0;
+    return 1;
+}
+
+static int parse_decimal_id(const char *value, int *out){
+    if (!is_decimal_id(value)) return 0;
+    int parsed = 0;
+    for (const unsigned char *p = (const unsigned char*)value; *p; p++){
+        int digit = *p - '0';
+        if (parsed > (INT_MAX - digit) / 10) return -1;
+        parsed = parsed * 10 + digit;
+    }
+    *out = parsed;
+    return 1;
+}
 
 /* 查歌名 */
 static void get_song_name(sqlite3 *db, int id, char *out, int n){
@@ -147,19 +213,26 @@ static void make_dl_folder(int id, const char *name, wchar_t *wfolder, int n){
 }
 
 /* 通用结尾: 多选 -> 批量下载到 wfolder */
-static int pick_and_download(const char *title, sqlite3 *db, sqlite3 *rdb,
-                             BItem *items, int n, const wchar_t *wfolder){
+static int pick_and_download_default(const char *title, sqlite3 *db,
+                                     sqlite3 *rdb, BItem *items, int n,
+                                     const wchar_t *wfolder, int select_all){
     if (n == 0){ printf("没有可下载的资源\n"); return 0; }
     static dbdef tmp[MAX_ITEMS + 1];
     static int picked[MAX_ITEMS];
     make_menu(tmp, items, n);
+    if (select_all)
+        for (int i = 0; i < n; i++) tmp[i].state = 1;
     int rc = pager_picks(title, tmp, db, rdb, 1);
     if (rc <= 0){ if (rc == -1) printf("已取消\n"); return 0; }
     int c = collect(tmp, n, picked);
-    for (int i = 0; i < c; i++)
-        download_item(&items[picked[i]], wfolder);
-    printf("共下载 %d 个 -> %ls\n", c, wfolder);
+    int downloaded = download_selected(items, picked, c, wfolder);
+    printf("共下载 %d/%d 个 -> %ls\n", downloaded, c, wfolder);
     return c;
+}
+
+static int pick_and_download(const char *title, sqlite3 *db, sqlite3 *rdb,
+                             BItem *items, int n, const wchar_t *wfolder){
+    return pick_and_download_default(title, db, rdb, items, n, wfolder, 0);
 }
 
 /* ================== 通用: 搜 manifest 资源名 ================== */
@@ -174,51 +247,148 @@ static void browse_manifest(sqlite3 *rdb, const char *title,
     char like[300];
     snprintf(like, sizeof like, "%%%s%%", buf);
 
-    char sql[1000];
-    if (extra && extra[0])
-        snprintf(sql, sizeof sql,
-            "SELECT name,hash FROM manifests WHERE name LIKE ? %s ORDER BY name LIMIT %d",
-            extra, MAX_ITEMS);
-    else
-        snprintf(sql, sizeof sql,
-            "SELECT name,hash FROM manifests WHERE name LIKE ? ORDER BY name LIMIT %d",
-            MAX_ITEMS);
-
-    sqlite3_stmt *stmt = NULL;
-    if (sqlite3_prepare_v2(rdb, sql, -1, &stmt, NULL) != SQLITE_OK){
+    char where[512], sql[1000];
+    snprintf(where, sizeof where, "name LIKE ? %s", extra ? extra : "");
+    snprintf(sql, sizeof sql, "SELECT COUNT(*) FROM manifests WHERE %s", where);
+    sqlite3_stmt *count_stmt = NULL;
+    if (sqlite3_prepare_v2(rdb, sql, -1, &count_stmt, NULL) != SQLITE_OK){
         fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(rdb));
         return;
     }
-    sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
-
-    static BItem items[MAX_ITEMS];
-    int n = 0;
-    while (sqlite3_step(stmt) == SQLITE_ROW && n < MAX_ITEMS){
-        snprintf(items[n].name, sizeof items[n].name, "%s",
-                 (const char*)sqlite3_column_text(stmt, 0));
-        snprintf(items[n].hash, sizeof items[n].hash, "%s",
-                 (const char*)sqlite3_column_text(stmt, 1));
-        snprintf(items[n].disp, sizeof items[n].disp, "%s", items[n].name);
-        wcscpy(items[n].sub, subdir);
-        n++;
+    sqlite3_bind_text(count_stmt, 1, like, -1, SQLITE_TRANSIENT);
+    int rc = sqlite3_step(count_stmt);
+    sqlite3_int64 total = rc == SQLITE_ROW ? sqlite3_column_int64(count_stmt, 0) : -1;
+    sqlite3_finalize(count_stmt);
+    if (total < 0 || total > INT_MAX){
+        fprintf(stderr, "搜索结果数量无效: %s\n", sqlite3_errmsg(rdb));
+        return;
     }
-    sqlite3_finalize(stmt);
+    if (total == 0){ printf("没有匹配的资源\n"); return; }
 
-    if (n == 0){ printf("没有匹配的资源\n"); return; }
-    printf("匹配 %d 个(Space勾选, A全选, Enter下载):\n", n);
+    snprintf(sql, sizeof sql,
+             "SELECT name,hash FROM manifests WHERE %s ORDER BY name LIMIT ? OFFSET ?", where);
+    sqlite3_stmt *page_stmt = NULL, *download_stmt = NULL;
+    if (sqlite3_prepare_v2(rdb, sql, -1, &page_stmt, NULL) != SQLITE_OK){
+        fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(rdb));
+        return;
+    }
+    /* 每次换页绑定关键词和页范围。 */
+    int rows = console_rows() - 4;
+    if (rows < 1) rows = 1;
+    BItem *items = calloc((size_t)rows, sizeof *items);
+    unsigned char *selected = calloc((size_t)total, sizeof *selected);
+    if (!items || !selected){
+        fprintf(stderr, "搜索结果内存分配失败\n");
+        free(items);
+        free(selected);
+        sqlite3_finalize(page_stmt);
+        return;
+    }
 
-    static dbdef tmp[MAX_ITEMS + 1];
-    make_menu(tmp, items, n);
-    int rc = pager_picks(title, tmp, NULL, rdb, 1);
-    if (rc <= 0){ if (rc == -1) printf("已取消\n"); return; }
+    int sel = 0, loaded_page = -1, loaded_n = 0, chosen = 0, cancelled = 0;
+    printf("\x1b[?25l");
+    while (1){
+        int page = sel / rows;
+        if (page != loaded_page){
+            sqlite3_reset(page_stmt);
+            sqlite3_clear_bindings(page_stmt);
+            sqlite3_bind_text(page_stmt, 1, like, -1, SQLITE_TRANSIENT);
+            sqlite3_bind_int(page_stmt, 2, rows);
+            sqlite3_bind_int(page_stmt, 3, page * rows);
+            loaded_n = 0;
+            while ((rc = sqlite3_step(page_stmt)) == SQLITE_ROW && loaded_n < rows){
+                const char *name = (const char*)sqlite3_column_text(page_stmt, 0);
+                const char *hash = (const char*)sqlite3_column_text(page_stmt, 1);
+                snprintf(items[loaded_n].name, sizeof items[loaded_n].name, "%s", name);
+                snprintf(items[loaded_n].hash, sizeof items[loaded_n].hash, "%s", hash);
+                snprintf(items[loaded_n].disp, sizeof items[loaded_n].disp, "%s", name);
+                wcscpy(items[loaded_n].sub, subdir);
+                loaded_n++;
+            }
+            if (rc != SQLITE_DONE && !(rc == SQLITE_ROW && loaded_n == rows)){
+                fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(rdb));
+                cancelled = 1;
+                break;
+            }
+            loaded_page = page;
+        }
+        printf("\x1b[2J\x1b[H%s   [第%d页/%d页] 匹配%d 已选%d ↑↓选择  Space勾选  A全选/全不选  PgUp/PgDn翻页  Enter下载  Esc取消\n\n",
+               title, page + 1, ((int)total - 1) / rows + 1, (int)total, chosen);
+        for (int i = 0; i < loaded_n; i++){
+            int index = page * rows + i;
+            printf(index == sel ? "\x1b[7m%s %s\x1b[0m\n" : "%s %s\n",
+                   selected[index] ? "[X]" : "[ ]", items[i].disp);
+        }
+        int key = _getch();
+        if (key == 0xE0 || key == 0){
+            key = _getch();
+            switch (key){
+            case 0x48: if (sel > 0) sel--; break;
+            case 0x50: if (sel < total - 1) sel++; break;
+            case 0x49: sel = sel > rows ? sel - rows : 0; break;
+            case 0x51: sel = sel < total - rows ? sel + rows : (int)total - 1; break;
+            case 0x47: sel = 0; break;
+            case 0x4F: sel = (int)total - 1; break;
+            }
+        } else if (key == ' '){
+            selected[sel] = !selected[sel];
+            chosen += selected[sel] ? 1 : -1;
+            if (sel < total - 1) sel++;
+        } else if (key == 'a' || key == 'A'){
+            int all = chosen != total;
+            memset(selected, all, (size_t)total);
+            chosen = all ? (int)total : 0;
+        } else if (key == '\r' || key == '\n'){
+            break;
+        } else if (key == 27){
+            cancelled = 1;
+            break;
+        }
+    }
+    printf("\x1b[?25h\x1b[2J\x1b[H");
+    sqlite3_finalize(page_stmt);
+    free(items);
+    if (cancelled || chosen == 0){
+        if (cancelled) printf("已取消\n");
+        free(selected);
+        return;
+    }
 
-    static int picked[MAX_ITEMS] ;
-    int c = collect(tmp, n, picked);    //返回勾选数量
+    snprintf(sql, sizeof sql, "SELECT name,hash FROM manifests WHERE %s ORDER BY name", where);
+    if (sqlite3_prepare_v2(rdb, sql, -1, &download_stmt, NULL) != SQLITE_OK){
+        fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(rdb));
+        free(selected);
+        return;
+    }
+    sqlite3_bind_text(download_stmt, 1, like, -1, SQLITE_TRANSIENT);
     wchar_t wroot[1024];
     get_dl_root(wroot, 1024);
-    for (int i = 0; i < c; i++)
-        download_item(&items[picked[i]], wroot);
-    printf("共下载 %d 个 -> %ls\n", c, wroot);
+    BItem batch[DOWNLOAD_BATCH_SIZE];
+    int index = 0, selected_count = 0, batch_count = 0, downloaded = 0;
+    while ((rc = sqlite3_step(download_stmt)) == SQLITE_ROW && index < total){
+        if (selected[index] && selected_count < chosen){
+            BItem *item = &batch[batch_count++];
+            memset(item, 0, sizeof *item);
+            snprintf(item->name, sizeof item->name, "%s",
+                     (const char*)sqlite3_column_text(download_stmt, 0));
+            snprintf(item->hash, sizeof item->hash, "%s",
+                     (const char*)sqlite3_column_text(download_stmt, 1));
+            wcscpy(item->sub, subdir);
+            selected_count++;
+            if (batch_count == DOWNLOAD_BATCH_SIZE){
+                downloaded += download_selected(batch, NULL, batch_count, wroot);
+                batch_count = 0;
+            }
+        }
+        index++;
+    }
+    if (rc != SQLITE_DONE)
+        fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(rdb));
+    sqlite3_finalize(download_stmt);
+    if (batch_count)
+        downloaded += download_selected(batch, NULL, batch_count, wroot);
+    free(selected);
+    printf("共下载 %d/%d 个 -> %ls\n", downloaded, selected_count, wroot);
 }
 
 /* 每个类别一个小包装(签名必须和 dbdef.func 一致) */
@@ -281,45 +451,192 @@ static int browse_chart(sqlite3 *db, sqlite3 *rdb){
     return 0;
 }
 
-/* 舞台: 先按歌名/id 找歌, 再列出这首歌的舞台 */
+/* Return 1 when the manifest contains the package, including an existing entry. */
+static int add_stage_package(sqlite3 *rdb, BItem *items, int *n,
+                             int music_id, int live_id, int source_bg,
+                             int target_bg, const char *name, const char *kind){
+    char hash[64];
+    if (get_hash(rdb, name, hash, sizeof hash) != 0) return 0;
+    for (int i = 0; i < *n; i++){
+        if (strcmp(items[i].name, name) == 0 && wcscmp(items[i].sub, L"舞台") == 0){
+            char ref[48];
+            snprintf(ref, sizeof ref, "+%d/%d", music_id, live_id);
+            int already_present = 0;
+            size_t ref_len = strlen(ref);
+            for (char *p = strstr(items[i].disp, ref); p;
+                 p = strstr(p + ref_len, ref)){
+                char before = p == items[i].disp ? '\0' : p[-1];
+                char after = p[ref_len];
+                if ((before == '\0' || before == ',') &&
+                    (after == '\0' || after == ',')){
+                    already_present = 1;
+                    break;
+                }
+            }
+            if (!already_present){
+                size_t used = strlen(items[i].disp);
+                if (used + strlen(ref) + 2 < sizeof items[i].disp){
+                    strcat(items[i].disp, ",");
+                    strcat(items[i].disp, ref);
+                }
+            }
+            return 1;
+        }
+    }
+    if (*n >= MAX_ITEMS) return 1;
+
+    BItem *item = &items[*n];
+    snprintf(item->name, sizeof item->name, "%s", name);
+    snprintf(item->hash, sizeof item->hash, "%s", hash);
+    if (source_bg == target_bg)
+        snprintf(item->disp, sizeof item->disp,
+                 "%d/%d bg%d %s %s", music_id, live_id, target_bg, kind, name);
+    else
+        snprintf(item->disp, sizeof item->disp,
+                 "%d/%d bg%d>%d %s %s", music_id, live_id,
+                 source_bg, target_bg, kind, name);
+    wcscpy(item->sub, L"舞台");
+    (*n)++;
+    return 1;
+}
+
+static int add_stage_3d_packages_for_bg(sqlite3 *rdb, BItem *items, int *n,
+                                        int music_id, int live_id, int bg_id){
+    static const struct {
+        const char *format;
+        const char *kind;
+    } packages[] = {
+        {"3d_stage_%04d.unity3d", "3D舞台"},
+        {"3d_stage_%04d_hq.unity3d", "3D舞台HQ"},
+        {"3d_stage_%04d_variable.unity3d", "3D舞台变量资源"},
+        {"3d_stage_%04d_variable_hq.unity3d", "3D舞台变量资源HQ"},
+        {"3d_stage_%04d_variable_low.unity3d", "3D舞台变量资源Low"}
+    };
+    int found = 0;
+    char name[256];
+    for (size_t i = 0; i < sizeof packages / sizeof packages[0]; i++){
+        snprintf(name, sizeof name, packages[i].format, bg_id);
+        found += add_stage_package(rdb, items, n, music_id, live_id,
+                                   bg_id, bg_id, name, packages[i].kind);
+    }
+    return found;
+}
+
+static int add_stage_2d_packages_for_bg(sqlite3 *rdb, BItem *items, int *n,
+                                        int music_id, int live_id,
+                                        int source_bg, int target_bg){
+    static const struct {
+        const char *format;
+        const char *kind;
+    } packages[] = {
+        {"live_bg2d_bg_live_%d.unity3d", "2D舞台背景"},
+        {"anime_fl_liv_2dbg_%d.unity3d", "动态2D背景"},
+        {"anime_fl_liv_2dbg_%d_hq.unity3d", "动态2D背景HQ"}
+    };
+    int found = 0;
+    char name[256];
+    for (size_t i = 0; i < sizeof packages / sizeof packages[0]; i++){
+        snprintf(name, sizeof name, packages[i].format, target_bg);
+        found += add_stage_package(rdb, items, n, music_id, live_id,
+                                   source_bg, target_bg, name, packages[i].kind);
+    }
+    return found;
+}
+
+/* Include conditional background substitutions recorded by the master DB. */
+static int add_stage_packages_for_live(sqlite3 *db, sqlite3 *rdb,
+                                       BItem *items, int *n,
+                                       int music_id, int live_id, int live_bg){
+    int stage_bg = 0;
+    int found_3d = 0;
+    if (stage_bg_for_live(live_id, &stage_bg))
+        found_3d = add_stage_3d_packages_for_bg(rdb, items, n,
+                                                music_id, live_id, stage_bg);
+
+    if (live_bg <= 0) return found_3d;
+    add_stage_2d_packages_for_bg(rdb, items, n, music_id, live_id,
+                                 live_bg, live_bg);
+    sqlite3_stmt *stmt = NULL;
+    if (sqlite3_prepare_v2(db,
+            "SELECT after_bg_id FROM live_bg_replace WHERE before_bg_id=? "
+            "AND (include_live_id=0 OR include_live_id=?) "
+            "AND (exclude_live_id=0 OR exclude_live_id<>?) ORDER BY id",
+            -1, &stmt, NULL) != SQLITE_OK)
+        return found_3d;
+    sqlite3_bind_int(stmt, 1, live_bg);
+    sqlite3_bind_int(stmt, 2, live_id);
+    sqlite3_bind_int(stmt, 3, live_id);
+    while (sqlite3_step(stmt) == SQLITE_ROW){
+        int replacement_bg = sqlite3_column_int(stmt, 0);
+        if (replacement_bg > 0 && replacement_bg != live_bg)
+            add_stage_2d_packages_for_bg(rdb, items, n, music_id, live_id,
+                                         live_bg, replacement_bg);
+    }
+    sqlite3_finalize(stmt);
+    return found_3d;
+}
+
+/* Aggregate all selected songs into one de-duplicated stage package picker. */
 static int browse_stage(sqlite3 *db, sqlite3 *rdb){
     int ids[32];
     int nids = choose_songs(db, ids, 32);
     if (nids <= 0) return 0;
-    for (int s = 0; s < nids; s++){
-        int id = ids[s];
-        char sname[128];
-        get_song_name(db, id, sname, sizeof sname);
-        printf("\n========== %d|%s 的舞台 ==========\n", id, sname);
 
-        static BItem items[MAX_ITEMS];
-        int n = 0;
-        char res[256];
+    static BItem items[MAX_ITEMS];
+    int n = 0, missing = 0;
+    for (int s = 0; s < nids; s++){
         sqlite3_stmt *lstmt = NULL;
         if (sqlite3_prepare_v2(db,
                 "SELECT id, live_bg FROM live_data WHERE music_data_id=? ORDER BY id",
-                -1, &lstmt, NULL) == SQLITE_OK){
-            sqlite3_bind_int(lstmt, 1, id);
-            while (sqlite3_step(lstmt) == SQLITE_ROW && n < MAX_ITEMS){
-                int live_id = sqlite3_column_int(lstmt, 0);
-                int live_bg = sqlite3_column_int(lstmt, 1);
-                if (live_bg > 0){
-                    snprintf(res, sizeof res, "3d_stage_%d.unity3d", live_bg);
-                    add_res(rdb, items, &n, res, L"舞台");
-                    if (n > 0)
-                        snprintf(items[n-1].disp, sizeof items[n-1].disp,
-                                 "live %d | 舞台 %d", live_id, live_bg);
-                    snprintf(res, sizeof res, "3d_stage_%d_hq.unity3d", live_bg);
-                    add_res(rdb, items, &n, res, L"舞台");
-                }
-            }
-            sqlite3_finalize(lstmt);
+                -1, &lstmt, NULL) != SQLITE_OK){
+            fprintf(stderr, "查询歌曲%d舞台失败: %s\n", ids[s], sqlite3_errmsg(db));
+            continue;
         }
-        wchar_t wfolder[1024];
-        make_dl_folder(id, sname, wfolder, 1024);
-        pick_and_download("舞台资源(空格勾选, Enter下载)", db, rdb,
-                          items, n, wfolder);
+        sqlite3_bind_int(lstmt, 1, ids[s]);
+        char song_name[128];
+        get_song_name(db, ids[s], song_name, sizeof song_name);
+        printf("歌曲 %d | %s\n", ids[s], song_name);
+        while (sqlite3_step(lstmt) == SQLITE_ROW){
+            int live_id = sqlite3_column_int(lstmt, 0);
+            int live_bg = sqlite3_column_int(lstmt, 1);
+            if (add_stage_packages_for_live(db, rdb, items, &n,
+                                            ids[s], live_id, live_bg) == 0){
+                int stage_bg = 0;
+                if (!stage_map_available()){
+                    printf("歌%d | live%d：缺少 stage_live_map.csv，无法读取 Master3dLive 舞台映射\n",
+                           ids[s], live_id);
+                } else if (!stage_bg_for_live(live_id, &stage_bg)){
+                    printf("歌%d | live%d：Master3dLive 中没有对应的 3D 舞台配置\n",
+                           ids[s], live_id);
+                } else {
+                    printf("歌%d | live%d | 3D bg%d：资源清单中没有对应的舞台 Unity 包\n",
+                           ids[s], live_id, stage_bg);
+                }
+                missing++;
+            }
+            if (n >= MAX_ITEMS) break;
+        }
+        sqlite3_finalize(lstmt);
+        if (n >= MAX_ITEMS) break;
     }
+    if (n == 0){
+        printf(missing ? "没有可下载的舞台包；请确认 stage_live_map.csv、master.mdb 和资源清单可用\n"
+                       : "所选歌曲没有舞台记录\n");
+        return 0;
+    }
+
+    wchar_t wroot[1024];
+    get_dl_root(wroot, 1024);
+    mkdirs(wroot);
+    int three_d_count = 0;
+    for (int i = 0; i < n; i++)
+        if (strncmp(items[i].name, "3d_stage_", 9) == 0)
+            three_d_count++;
+    char title[160];
+    snprintf(title, sizeof title,
+             "舞台资源(%d首歌/%d个3D包/%d个2D背景包；默认全选, Enter下载)",
+             nids, three_d_count, n - three_d_count);
+    pick_and_download_default(title, db, rdb, items, n, wroot, 1);
     return 0;
 }
 
@@ -365,7 +682,7 @@ static int browse_action(sqlite3 *db, sqlite3 *rdb){
 /* 3D模型: 按卡名/角色名/id 找卡, 再列出模型资源 */
 static int browse_model(sqlite3 *db, sqlite3 *rdb){
     int ids[64];
-    int nids = choose_cards(db, ids, 64);
+    int nids = choose_model_cards(db, ids, 64);
     if (nids <= 0) return 0;
     for (int s = 0; s < nids; s++){
         int card_id = ids[s];
@@ -382,7 +699,9 @@ static int browse_model(sqlite3 *db, sqlite3 *rdb){
         int chara_id = sqlite3_column_int(stmt, 2);
         int dress_id = sqlite3_column_int(stmt, 3);
         sqlite3_finalize(stmt);
-        printf("\n========== %d|%s 的3D模型 ==========\n", card_id, cname);
+        printf("\n========== %d|%s | chara_id=%d", card_id, cname, chara_id);
+        if (dress_id > 0) printf(" | dress_id=%d", dress_id);
+        printf(" 的3D模型 ==========\n");
 
         static BItem items[MAX_ITEMS];
         int n = 0;
@@ -411,8 +730,16 @@ static int browse_model(sqlite3 *db, sqlite3 *rdb){
         }
         wchar_t wfolder[1024];
         make_dl_folder(card_id, cname, wfolder, 1024);
-        pick_and_download("3D模型资源(空格勾选, Enter下载)", db, rdb,
-                          items, n, wfolder);
+        char title[256];
+        if (dress_id > 0)
+            snprintf(title, sizeof title,
+                     "3D模型资源 [card_id=%d chara_id=%d dress_id=%d] (空格勾选, Enter下载)",
+                     card_id, chara_id, dress_id);
+        else
+            snprintf(title, sizeof title,
+                     "3D模型资源 [card_id=%d chara_id=%d] (空格勾选, Enter下载)",
+                     card_id, chara_id);
+        pick_and_download(title, db, rdb, items, n, wfolder);
     }
     return 0;
 }
@@ -724,8 +1051,8 @@ static int browse_cg(sqlite3 *db, sqlite3 *rdb){
 
         /* 自动下载全部(影片 + 配对音频), 不弹选择菜单 */
         printf("自动下载 %d 个文件(影片+配对音频)...\n", n2);
-        for (int i = 0; i < n2; i++)
-            download_item(&items[i], wfolder);
+        int downloaded = download_selected(items, NULL, n2, wfolder);
+        printf("成功下载 %d/%d 个文件\n", downloaded, n2);
 
         /* 下载完问一句: 要不要直接解包并合成音频 */
         char yn[16];
@@ -776,8 +1103,13 @@ static int choose_songs(sqlite3 *db, int *ids, int max){
     if (!buf[0]) return 0;
 
     sqlite3_stmt *stmt = NULL;
-    if (isdigit((unsigned char)buf[0])){
-        int mid = atoi(buf);
+    int mid = 0;
+    int numeric = parse_decimal_id(buf, &mid);
+    if (numeric != 0){
+        if (numeric < 0){
+            printf("歌曲ID超出有效范围\n");
+            return 0;
+        }
         if (sqlite3_prepare_v2(db, "SELECT id,name FROM music_data WHERE id=?",
                                -1, &stmt, NULL) == SQLITE_OK){
             sqlite3_bind_int(stmt, 1, mid);
@@ -839,6 +1171,118 @@ static int choose_cards(sqlite3 *db, int *ids, int max){
     return pick_rows(stmt, ids, max);
 }
 
+/* 3D模型搜索结果需要在卡片行中显示角色ID及可用的服装ID。 */
+static int pick_model_rows(sqlite3_stmt *stmt, int *out, int max){
+    static int row_ids[512];
+    static dbdef tmp[513];
+    int n = 0;
+    while (sqlite3_step(stmt) == SQLITE_ROW && n < 512){
+        int card_id = sqlite3_column_int(stmt, 0);
+        int chara_id = sqlite3_column_int(stmt, 2);
+        int dress_id = sqlite3_column_int(stmt, 3);
+        const char *name = (const char*)sqlite3_column_text(stmt, 1);
+        row_ids[n] = card_id;
+        if (dress_id > 0)
+            snprintf(tmp[n].name, sizeof tmp[n].name,
+                     "%d | chara_id=%d | dress_id=%d | %s",
+                     card_id, chara_id, dress_id, name ? name : "");
+        else
+            snprintf(tmp[n].name, sizeof tmp[n].name,
+                     "%d | chara_id=%d | %s", card_id, chara_id,
+                     name ? name : "");
+        tmp[n].func = NULL;
+        tmp[n].state = 0;
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    if (n == 0){ printf("没有匹配的记录\n"); return 0; }
+    if (n == 1){ out[0] = row_ids[0]; return 1; }
+
+    snprintf(tmp[n].name, sizeof tmp[n].name, "END");
+    tmp[n].func = NULL;
+    tmp[n].state = 0;
+    int rc = pager_picks("3D模型搜索结果(空格勾选, Enter确认)",
+                         tmp, NULL, NULL, 1);
+    if (rc <= 0) return 0;
+    int c = 0;
+    for (int i = 0; i < n && c < max; i++)
+        if (tmp[i].state) out[c++] = row_ids[i];
+    return c;
+}
+
+static int read_model_search_term(char *buf, size_t cap){
+    if (!buf || cap < 2) return 0;
+
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD mode = 0;
+    if (input != INVALID_HANDLE_VALUE && GetConsoleMode(input, &mode)){
+        wchar_t wide[256];
+        DWORD count = 0;
+        if (!ReadConsoleW(input, wide, (DWORD)(sizeof wide / sizeof wide[0] - 1),
+                          &count, NULL))
+            return 0;
+        while (count > 0 && (wide[count - 1] == L'\r' || wide[count - 1] == L'\n'))
+            count--;
+        int bytes = count == 0 ? 0 : WideCharToMultiByte(
+            CP_UTF8, 0, wide, (int)count, buf, (int)cap - 1, NULL, NULL);
+        if (count > 0 && bytes <= 0) return 0;
+        buf[bytes] = 0;
+        return 1;
+    }
+
+    if (!fgets(buf, (int)cap, stdin)) return 0;
+    buf[strcspn(buf, "\r\n")] = 0;
+    return 1;
+}
+
+/* 选3D模型卡片: 沿用通用卡片的卡名/角色名/卡id/角色id匹配规则。 */
+static int choose_model_cards(sqlite3 *db, int *ids, int max){
+    char buf[128];
+    printf("输入卡名/角色名(模糊)或id: ");
+    if (!read_model_search_term(buf, sizeof buf)) return 0;
+    if (!buf[0]) return 0;
+
+    sqlite3_stmt *stmt = NULL;
+    int nid = 0;
+    int numeric = parse_decimal_id(buf, &nid);
+    if (numeric != 0){
+        if (numeric < 0){
+            printf("卡片/角色ID超出有效范围\n");
+            return 0;
+        }
+        if (sqlite3_prepare_v2(db,
+                "SELECT id,name,chara_id,open_dress_id FROM card_data WHERE id=?",
+                -1, &stmt, NULL) == SQLITE_OK){
+            sqlite3_bind_int(stmt, 1, nid);
+            int r = pick_model_rows(stmt, ids, max);
+            if (r > 0) return r;
+        }
+        if (sqlite3_prepare_v2(db,
+                "SELECT id,name,chara_id,open_dress_id FROM card_data "
+                "WHERE chara_id=? ORDER BY id",
+                -1, &stmt, NULL) == SQLITE_OK){
+            sqlite3_bind_int(stmt, 1, nid);
+            return pick_model_rows(stmt, ids, max);
+        }
+        return 0;
+    }
+
+    char like[256];
+    snprintf(like, sizeof like, "%%%s%%", buf);
+    if (sqlite3_prepare_v2(db,
+            "SELECT c.id,c.name,c.chara_id,c.open_dress_id FROM card_data c "
+            "WHERE c.name LIKE ? "
+            "OR c.chara_id IN (SELECT chara_id FROM chara_data WHERE name LIKE ?) "
+            "ORDER BY c.id",
+            -1, &stmt, NULL) != SQLITE_OK){
+        fprintf(stderr, "SQL错误: %s\n", sqlite3_errmsg(db));
+        return 0;
+    }
+    sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
+    sqlite3_bind_text(stmt, 2, like, -1, SQLITE_TRANSIENT);
+    return pick_model_rows(stmt, ids, max);
+}
+
 /* ================== 歌曲 ================== */
 
 static int browse_song(sqlite3 *db, sqlite3 *rdb){
@@ -891,12 +1335,8 @@ static int browse_song(sqlite3 *db, sqlite3 *rdb){
                 int live_bg = sqlite3_column_int(lstmt, 1);
                 snprintf(res, sizeof res, "musicscores_m%d.bdb", live_id);
                 add_res(rdb, items, &n, res, L"谱面");
-                if (live_bg > 0){
-                    snprintf(res, sizeof res, "3d_stage_%d.unity3d", live_bg);
-                    add_res(rdb, items, &n, res, L"舞台");
-                    snprintf(res, sizeof res, "3d_stage_%d_hq.unity3d", live_bg);
-                    add_res(rdb, items, &n, res, L"舞台");
-                }
+                add_stage_packages_for_live(db, rdb, items, &n,
+                                            id, live_id, live_bg);
             }
             sqlite3_finalize(lstmt);
         }
@@ -935,9 +1375,8 @@ static int browse_song(sqlite3 *db, sqlite3 *rdb){
         utf8_to_wide(folder, wfoldername, 512);
         swprintf(wfolder, 1024, L"%ls\\%ls", wroot, wfoldername);
         mkdirs(wfolder);
-        for (int i = 0; i < c; i++)
-            download_item(&items[picked[i]], wfolder);
-        printf("共下载 %d 个 -> %ls\n", c, wfolder);
+        int downloaded = download_selected(items, picked, c, wfolder);
+        printf("共下载 %d/%d 个 -> %ls\n", downloaded, c, wfolder);
     }
     return 0;
 }
@@ -1031,9 +1470,8 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
         utf8_to_wide(folder, wfoldername, 512);
         swprintf(wfolder, 1024, L"%ls\\%ls", wroot, wfoldername);
         mkdirs(wfolder);
-        for (int i = 0; i < c; i++)
-            download_item(&items[picked[i]], wfolder);
-        printf("共下载 %d 个 -> %ls\n", c, wfolder);
+        int downloaded = download_selected(items, picked, c, wfolder);
+        printf("共下载 %d/%d 个 -> %ls\n", downloaded, c, wfolder);
     }
     return 0;
 }
@@ -1091,7 +1529,7 @@ int browse_main(void){
         return -1;
     }
     if (!mp){
-        fprintf(stderr, "缺少 manifest_*.db（资源清单库），请先运行 check_update.exe 获取\n");
+        fprintf(stderr, "缺少 manifest_*.db（资源清单库）；联网同步失败且本地没有可用清单\n");
         return -1;
     }
     if (sqlite3_open(DB_PATH, &db) != SQLITE_OK){

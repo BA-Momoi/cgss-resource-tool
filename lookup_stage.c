@@ -9,11 +9,12 @@
 #include "sqlite3.h"
 #include "lookup_table.h"
 #include "GBKswapUTF8.h"
+#include "stage_map.h"
 
 // 3D ????
 /* ================== 6. 3D舞台 ================== */
 
-/* 按歌曲 id 查舞台（live_data.live_bg → 3d_stage_{live_bg}） */
+/* Resolve live_data.id through Master3dLive.id, then use Master3dLive.bg. */
 static void querystage_by_music_id(sqlite3 *db, sqlite3 *rdb){
     char buf[64];
     while (1) {
@@ -52,12 +53,31 @@ static void querystage_by_music_id(sqlite3 *db, sqlite3 *rdb){
         while (sqlite3_step(lstmt) == SQLITE_ROW) {
             int live_id = sqlite3_column_int(lstmt, 0);
             int live_bg = sqlite3_column_int(lstmt, 1);
-            printf("live %d | 舞台bg:%d\n", live_id, live_bg);
+            int stage_bg = 0;
+            printf("live %d | live_bg:%d | ", live_id, live_bg);
+            if (!stage_bg_for_live(live_id, &stage_bg)){
+                printf("Master3dLive 中没有对应的 3D 舞台映射\n");
+                n++;
+                continue;
+            }
+            printf("Master3dLive.bg:%d\n", stage_bg);
+            static const struct {
+                const char *format;
+                const char *label;
+            } packages[] = {
+                {"3d_stage_%04d.unity3d", "舞台"},
+                {"3d_stage_%04d_hq.unity3d", "舞台HQ"},
+                {"3d_stage_%04d_variable.unity3d", "舞台变量资源"},
+                {"3d_stage_%04d_variable_hq.unity3d", "舞台变量资源HQ"},
+                {"3d_stage_%04d_variable_low.unity3d", "舞台变量资源Low"}
+            };
             char res[256];
-            snprintf(res, sizeof res, "3d_stage_%d.unity3d", live_bg);
-            printf("舞台:%s\t", res); print_res_hash(rdb, res); printf("\n");
-            snprintf(res, sizeof res, "3d_stage_%d_hq.unity3d", live_bg);
-            printf("舞台HQ:%s\t", res); print_res_hash(rdb, res); printf("\n");
+            for (size_t i = 0; i < sizeof packages / sizeof packages[0]; i++){
+                snprintf(res, sizeof res, packages[i].format, stage_bg);
+                printf("%s:%s\t", packages[i].label, res);
+                print_res_hash(rdb, res);
+                printf("\n");
+            }
             n++;
         }
         sqlite3_finalize(lstmt);

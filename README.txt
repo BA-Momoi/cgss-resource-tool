@@ -1,6 +1,6 @@
 ==================================================
   CGSS 资源工具 v1.41
-  查询 / 下载 / 解包 / Spine 预览 一体化
+  查询 / 下载 / 解包 / Spine 预览 / USM 解包
 ==================================================
 
 【这是什么】
@@ -19,62 +19,48 @@ PNG / FBX / WAV / Spine 工程文件，并在浏览器里预览卡面动画。
 【目录说明】
 
   CGSS_Script.exe            主程序（双击运行）
-  check_update.exe           资源清单检查 / 下载工具（可选）
+  usm.exe                    USM 视频解包工具
   master.mdb                 游戏主库（卡片/角色/歌曲数据）
-  manifest_10133800.db       资源清单库（资源名 -> hash）
-  spine_preview\             Spine 浏览器预览网页（主菜单 4 使用）
-  AssetStudio\               模型解包引擎（.NET 7，可选）
+  manifest_*.db              资源清单库（资源名 -> hash）
+  ffmpeg.exe                 视频转换工具
+  spine_preview\             Spine 浏览器预览网页（主菜单 3 使用）
+  AssetStudio\               模型解包引擎
+  dotnet\                     随包提供的 .NET 7 运行时
   acb2wavs.exe + *.dll       语音解码（可选）
   cgss_apply_textures.py     Blender 贴图脚本（可选）
   cgss_anim_to_shapekeys.py  Blender 形态键脚本（可选）
 
-注：CGSS_ResourceTool_nodb.zip 不含 master.mdb 和
-manifest_10133800.db，需要自行准备数据库。
-
-
 【快速开始】
 
 1. 解压，保持所有文件在同一目录
-2. 双击 CGSS_Script.exe
-3. 主菜单选择：
-     1.数据表查找数据    2.数据下载并解析
-     3.解包              4.打开Spine预览(beta)
+2. 联网启动时会检查资源清单并自动同步 master.mdb；离线时继续使用本地数据库
+3. 双击 CGSS_Script.exe
+4. 主菜单选择：
+     1.资源查找与下载    2.解包
+     3.打开Spine预览     4.USM/CG解包
+     5.退出
 
 下载的资源保存在本目录 CGSS_DOWN\ 下，按角色/类型分目录。
 
 
-【check_update.exe 是什么】
-
-游戏已停止更新新内容，数据库为最终版本。check_update 用于：
-
-  - 确认清单库是最新版本（运行后显示"已是最新"即可）
-  - 没有数据库时自动补齐：清单库 + master.mdb 都会自动下载
-    （精简版 _nodb 解压后运行一次，两个库就齐了）
-
-运行方式：放在与 CGSS_Script.exe 相同目录后双击，
-或命令行执行：check_update.exe [目录]
-
-完整版已含两个库，运行时会显示"已是最新 / master.mdb 已存在"。
-
-
 【依赖】
 
-  - 模型解包为 FBX：需要安装 .NET 7 Desktop Runtime
+  - 完整发布包附带 .NET 7 和 Windows Desktop Runtime，无需另行安装
   - 语音解码：acb2wavs.exe 及同目录 DLL 请不要删除或隔离
-  - Blender 脚本：配合 Blender 使用（可选）
+  - Spine 预览需要系统浏览器；Blender 脚本需配合 Blender 使用（可选）
 
 
 【常见问题】
 
 Q: 解包报"启动 AssetStudio.CLI 失败"？
-A: 安装 .NET 7 Desktop Runtime。
+A: 确认解压目录中的 dotnet 和 AssetStudio 文件夹完整；也可检查安全软件是否隔离了文件。
 
 Q: 语音解码无输出？
 A: 确认 acb2wavs.exe 和同目录 DLL 未被杀毒软件删除。
 
 Q: 提示缺少数据库？
-A: 完整包解压后数据库应与 exe 同目录；
-   精简版请自行准备，或运行 check_update.exe 获取清单库。
+A: 完整发布包中的 master.mdb 和 manifest_*.db 应与 exe 同目录。
+   若文件缺失，请重新解压完整包；下载资源还需要网络连接。
 
 Q: CLI 导出的 FBX 身体没有贴图？
 A: 带贴图的 body_FBX 请用 AssetStudio GUI 导出

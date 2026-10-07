@@ -5,12 +5,15 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 option(CGSS_STATIC "静态链接 MinGW 运行库（libgcc/libstdc++），发布版推荐开启" ON)
 add_executable(CGSS_Script
     main.c
+    check_update.c
+    CLI.c
     lookup_common.c lookup_3d.c lookup_spine.c lookup_song.c lookup_action.c
     lookup_chart.c lookup_card.c lookup_voice.c lookup_stage.c lookup_main.c
     download.c net.c acb.c util.c
     unpack.c unpack_fbx.c unpack_res.c
     sticker.c
     paper.c
+    stage_map.c
     browse.c
     cg.c
     spine_convert.c preview.c texture_merge.cpp
@@ -21,19 +24,18 @@ add_executable(CGSS_Script
     miniz/miniz.c)
 
 target_link_libraries(CGSS_Script winhttp gdiplus pathcch)
+target_compile_definitions(CGSS_Script PRIVATE CGSS_EMBED_CHECK_UPDATE)
 
 target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)
 
-# 独立的资源清单更新检查工具（check_update.exe）目前已暂时弃用
-#add_executable(check_update
-#    check_update.c
-#    sqlite3.c)
-#target_link_libraries(check_update winhttp)
-#target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
+# 可手动运行的资源清单/主库更新工具。
+add_executable(check_update EXCLUDE_FROM_ALL check_update.c sqlite3.c)
+target_link_libraries(check_update winhttp)
+target_compile_options(check_update PRIVATE -fexec-charset=UTF-8)
 
 if(CGSS_STATIC)
     target_link_options(CGSS_Script PRIVATE -static)
-#    target_link_options(check_update PRIVATE -static)
+    target_link_options(check_update PRIVATE -static)
 endif()
 # usm解包工具
 add_executable(usm usm.c)
@@ -52,4 +54,12 @@ if(EXISTS ${CMAKE_SOURCE_DIR}/ffmpeg.exe)
             ${CMAKE_SOURCE_DIR}/ffmpeg.exe
             $<TARGET_FILE_DIR:CGSS_Script>/ffmpeg.exe
         COMMENT "Copying ffmpeg.exe next to CGSS_Script.exe")
+endif()
+
+if(EXISTS "${CMAKE_SOURCE_DIR}/stage_live_map.csv")
+    add_custom_command(TARGET CGSS_Script POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/stage_live_map.csv
+            $<TARGET_FILE_DIR:CGSS_Script>/stage_live_map.csv
+        COMMENT "Copying Master3dLive stage mapping next to CGSS_Script")
 endif()

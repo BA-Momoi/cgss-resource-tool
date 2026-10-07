@@ -116,9 +116,10 @@ int open_spine_preview(void){
         return -1;
     }
     printf("\n浏览器已打开 preview.html。在页面里选择：\n");
-    printf("  骨架：上面角色的 spine 目录里全部 .skel（页面自动转 JSON，也支持 .json）\n");
-    printf("  图集：SP3S301290_tex.atlas（改成对应卡片的文件名）\n");
-    printf("  贴图：对应的 tex.png 和 tex_A8.png（A8 是透明通道，合成后无黑边）\n");
+    printf("  小人骨架：SPSprachen_N（旧卡）或 SPSprachen_s（新卡），只选一套 .json 或 .skel.asset\n");
+    printf("  小人图集/贴图：同一张卡的 SPC{卡id}.atlas(.asset) + SPC{卡id}.png\n");
+    printf("  卡面动画骨架：同一张卡的 bg/chara/eff1/eff2/fg 五个 .skel(.asset)\n");
+    printf("  卡面动画图集/贴图：SP3S{卡id}_tex.atlas(.asset) + 对应 tex.png 和 tex_A8.png\n");
     printf("  要导入 Spine 3.8.75 编辑器：打开 *_v38.json + *_v38.atlas + *_merged.png\n");
     printf("  小人提示：旧卡小人若显示\"大头\"，请把骨架换成 SPSprachen_N.json（spine 根目录里）\n");
     return 0;

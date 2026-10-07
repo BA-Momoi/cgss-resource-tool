@@ -1,5 +1,6 @@
 # 构建产物
 /build*/
+/out/
 CMakeCache.txt
 CMakeFiles/
 cmake_install.cmake
@@ -15,6 +16,12 @@ updata.zip
 # 游戏数据库（需自行获取，不入库）
 *.mdb
 *.db
+/master.mdb.sync
+/master.mdb.update
+/master.mdb.lz4
+/master.mdb.rollback.*
+/manifest_*.db.pending
+/manifest_*.db.lz4
 
 # 运行/下载/解包产物
 /CGSS_DOWN/
@@ -41,6 +48,18 @@ __pycache__/
 .DS_Store
 Thumbs.db
 .vscode/
+/.vs/
+/CMakeSettings.json
+
+# 本地翻译资源与设备备份
+/translation-device-backups/
+/translation-direct-replace/
+/translation-patches/
+/translation-resources/
+
+# 本地 APK 分析数据；保留可复用脚本
+/apk-analysis/*
+!/apk-analysis/copy-installed-apk.ps1
 
 # 本地文档（master_mdb 手册 / cysp 说明等，不随发布上传）
 docs/

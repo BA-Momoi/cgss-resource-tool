@@ -7,6 +7,9 @@
 #include "unpack.h"
 #include "acb.h"
 #include "paper.h"
+#include <dirent.h>
+#include <io.h>
+#include <sys/stat.h>
 
 void wipe_dir(const wchar_t *dir){
     wchar_t pat[1300];
@@ -31,6 +34,8 @@ void wipe_dir(const wchar_t *dir){
 /* 查找 exe 同目录 AssetStudio\AssetStudio.CLI.exe，找不到则置空（调用方提示） */
 
 void find_assetstudio(wchar_t *out, int n){
+    if (n <= 0) return;
+    out[0] = 0;
     wchar_t exedir[1024];
     GetModuleFileNameW(NULL, exedir, 1024);
     wchar_t *p = wcsrchr(exedir, L'\\');
@@ -38,9 +43,8 @@ void find_assetstudio(wchar_t *out, int n){
     wchar_t local[1200];
     swprintf(local, 1200, L"%ls\\AssetStudio\\AssetStudio.CLI.exe", exedir);
     if (GetFileAttributesW(local) != INVALID_FILE_ATTRIBUTES){
-        wcscpy(out, local);
-    } else {
-        out[0] = 0;
+        wcsncpy(out, local, (size_t)n - 1);
+        out[n - 1] = 0;
     }
 }
 
@@ -139,7 +143,6 @@ int copy_dir(const wchar_t *outdir, const wchar_t *sub, const wchar_t *dest, con
     FindClose(h);
     return n;
 }
-
 
 int unpack_main(void){
     def menu[]={

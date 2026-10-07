@@ -1,5 +1,5 @@
 /*
- * CGSS Spine 3.6 binary (.skel) -> Spine 3.6 JSON object.
+ * CGSS Spine 2.1/3.6 binary (.skel) -> Spine 3.6 JSON object.
  * JS port of skel2json.py. Handles the CGSS custom header (44 bytes),
  * big-endian floats/uint32/int16, and the missing nonessential section.
  *
@@ -448,7 +448,7 @@
       if (b.parent !== null) d.parent = b.parent;
       ['length', 'x', 'y', 'rotation', 'scaleX', 'scaleY', 'shearX', 'shearY'].forEach(function (k) {
         var isScale = k === 'scaleX' || k === 'scaleY';
-        if (isScale ? b[k] !== 1 : (b[k] !== 0 && b[k] !== 1)) d[k] = f(b[k]);
+        if (isScale ? b[k] !== 1 : b[k] !== 0) d[k] = f(b[k]);
       });
       if (b.transform !== 'normal') d.transform = b.transform;
       root.bones.push(d);
@@ -512,9 +512,193 @@
     return root;
   };
 
+  // The petit layout matches spine_convert.c; its card atlases use half-size coordinates.
+  function PetitParser(bytes) { Parser.call(this, bytes); }
+  PetitParser.prototype = Object.create(Parser.prototype);
+  PetitParser.prototype.parse = function () {
+    var r = this.r, i, n, scale = 0.5;
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var name = r.readString(), parent = r.readVarint() - 1;
+      var bone = { name: name, parent: parent < 0 ? null : this.bones[parent].name,
+        x: r.readFloat() * scale, y: r.readFloat() * scale,
+        scaleX: r.readFloat(), scaleY: r.readFloat(),
+        rotation: r.readFloat(), length: r.readFloat() * scale,
+        shearX: 0, shearY: 0, transform: 'normal' };
+      if (r.readBool()) bone.scaleX = -bone.scaleX;
+      if (r.readBool()) bone.scaleY = -bone.scaleY;
+      var inheritScale = r.readBool(), inheritRotation = r.readBool();
+      if (!inheritScale && !inheritRotation) bone.transform = 'onlyTranslation';
+      else if (!inheritScale) bone.transform = 'noScale';
+      else if (!inheritRotation) bone.transform = 'noRotationOrReflection';
+      this.bones.push(bone);
+    }
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var ik = { name: r.readString(), bones: [] };
+      for (var b = 0, count = r.readVarint(); b < count; b++) ik.bones.push(this.bones[r.readVarint()].name);
+      ik.target = this.bones[r.readVarint()].name;
+      ik.mix = r.readFloat(); ik.bendPositive = r.readByte() === 1;
+      this.ik.push(ik);
+    }
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var slot = { name: r.readString(), bone: this.bones[r.readVarint()].name, color: rgbaHex(r.readUint32()) };
+      var attachment = r.readString();
+      if (attachment !== null) slot.attachment = attachment;
+      slot.blend = r.readBool() ? 'additive' : 'normal';
+      this.slots.push(slot);
+    }
+    var skin = this.readSkin('default');
+    if (skin) this.skins.push(skin);
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      skin = this.readSkin(r.readString());
+      if (skin) this.skins.push(skin);
+    }
+    n = r.readVarint();
+    for (i = 0; i < n; i++) this.events.push({ name: r.readString(), int: r.readInt(false), float: r.readFloat(), string: r.readString() });
+    n = r.readVarint();
+    for (i = 0; i < n; i++) this.readAnimation(r.readString());
+    return this.toJson();
+  };
+
+  PetitParser.prototype.readAttachment = function (slotIdx, attachmentName) {
+    var r = this.r, name = r.readString() || attachmentName, type = r.readByte(), scale = 0.5;
+    var att = { type: type === 0 ? 'region' : (type === 1 ? 'boundingbox' : 'mesh'), name: name };
+    if (type === 0) {
+      att.path = r.readString() || name;
+      att.x = f(r.readFloat() * scale); att.y = f(r.readFloat() * scale);
+      att.scaleX = f(r.readFloat()); att.scaleY = f(r.readFloat());
+      att.rotation = f(r.readFloat());
+      att.width = f(r.readFloat() * scale); att.height = f(r.readFloat() * scale);
+      att.color = rgbaHex(r.readUint32());
+    } else if (type === 1) {
+      var count = r.readVarint();
+      att.vertexCount = count / 2; att.vertices = [];
+      for (var i = 0; i < count; i++) att.vertices.push(f(r.readFloat() * scale));
+    } else if (type === 2 || type === 3) {
+      att.path = r.readString() || name; att.color = rgbaHex(r.readUint32());
+      att.uvs = []; att.triangles = []; att.vertices = [];
+      for (var u = 0, nu = r.readVarint(); u < nu; u++) att.uvs.push(f(r.readFloat()));
+      for (var t = 0, nt = r.readVarint(); t < nt; t++) att.triangles.push(r.readShort());
+      var nv = r.readVarint();
+      for (var v = 0; v < nv; v++) {
+        if (type === 2) att.vertices.push(f(r.readFloat() * scale));
+        else {
+          var bones = r.readFloat();
+          if (!Number.isInteger(bones) || bones < 0) throw new Error('Invalid weighted vertex');
+          att.vertices.push(bones);
+          for (var b = 0; b < bones; b++) att.vertices.push(r.readFloat(), f(r.readFloat() * scale), f(r.readFloat() * scale), f(r.readFloat()));
+        }
+      }
+      att.hull = r.readVarint();
+    } else throw new Error('Unknown Spine 2.1 attachment type ' + type);
+    return att;
+  };
+
+  PetitParser.prototype.readAnimation = function (name) {
+    var r = this.r, timelines = [], i, j, n, fi, count;
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var slot = r.readVarint();
+      for (j = 0, count = r.readVarint(); j < count; j++) {
+        var type = r.readByte(), fc = r.readVarint(), frames = [];
+        if (type !== 3 && type !== 4) throw new Error('Unknown Spine 2.1 slot timeline ' + type);
+        for (fi = 0; fi < fc; fi++) {
+          var frame = { time: f(r.readFloat()) };
+          if (type === 3) frame.name = r.readString();
+          else { frame.color = rgbaHex(r.readUint32()); if (fi < fc - 1) frame.curve = this.readCurve(); }
+          frames.push(frame);
+        }
+        timelines.push({ kind: 'slot', slot: slot, type: type === 3 ? 'attachment' : 'color', frames: frames });
+      }
+    }
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var bone = r.readVarint();
+      for (j = 0, count = r.readVarint(); j < count; j++) {
+        type = r.readByte(); fc = r.readVarint(); frames = [];
+        if ([0, 1, 2, 5, 6].indexOf(type) < 0) throw new Error('Unknown Spine 2.1 bone timeline ' + type);
+        for (fi = 0; fi < fc; fi++) {
+          frame = { time: f(r.readFloat()) };
+          if (type === 5 || type === 6) { r.readBool(); continue; }
+          if (type === 1) frame.angle = f(r.readFloat());
+          else {
+            var scale = type === 2 ? 0.5 : 1;
+            frame.x = f(r.readFloat() * scale); frame.y = f(r.readFloat() * scale);
+          }
+          if (fi < fc - 1) frame.curve = this.readCurve();
+          frames.push(frame);
+        }
+        // Flip timelines have no equivalent in the existing 3.6 JSON converter.
+        if (type !== 5 && type !== 6) timelines.push({ kind: 'bone', bone: bone, type: ['scale', 'rotate', 'translate'][type], frames: frames });
+      }
+    }
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var ik = r.readVarint(); fc = r.readVarint(); frames = [];
+      for (fi = 0; fi < fc; fi++) {
+        frame = { time: f(r.readFloat()), mix: f(r.readFloat()), bendPositive: r.readByte() === 1 };
+        if (fi < fc - 1) frame.curve = this.readCurve();
+        frames.push(frame);
+      }
+      timelines.push({ kind: 'ik', index: ik, frames: frames });
+    }
+    n = r.readVarint();
+    for (i = 0; i < n; i++) {
+      var skin = this.skins[r.readVarint()].name;
+      for (j = 0, count = r.readVarint(); j < count; j++) {
+        slot = r.readVarint();
+        for (var a = 0, ac = r.readVarint(); a < ac; a++) {
+          var attachment = r.readString(); fc = r.readVarint(); frames = [];
+          for (fi = 0; fi < fc; fi++) {
+            frame = { time: f(r.readFloat()) };
+            var end = r.readVarint();
+            if (end) {
+              frame.offset = r.readVarint(); frame.vertices = [];
+              for (var v = 0; v < end; v++) frame.vertices.push(f(r.readFloat() * 0.5));
+            }
+            if (fi < fc - 1) frame.curve = this.readCurve();
+            frames.push(frame);
+          }
+          timelines.push({ kind: 'deform', skin: skin, slot: slot, attachment: attachment, frames: frames });
+        }
+      }
+    }
+    n = r.readVarint(); frames = [];
+    for (i = 0; i < n; i++) {
+      var offsets = [];
+      for (j = 0, count = r.readVarint(); j < count; j++) offsets.push({ slot: this.slots[r.readVarint()].name, offset: r.readVarint() });
+      frames.push({ offsets: offsets, time: f(r.readFloat()) });
+    }
+    if (n) timelines.push({ kind: 'drawOrder', frames: frames });
+    n = r.readVarint(); frames = [];
+    for (i = 0; i < n; i++) {
+      var time = r.readFloat(), event = this.events[r.readVarint()], iv = r.readInt(false), fv = r.readFloat();
+      var sv = r.readBool() ? r.readString() : null;
+      frame = { time: f(time), name: event.name };
+      if (iv) frame.int = iv;
+      if (fv) frame.float = f(fv);
+      if (sv !== null) frame.string = sv;
+      frames.push(frame);
+    }
+    if (n) timelines.push({ kind: 'event', frames: frames });
+    this.animations.push({ name: name, timelines: timelines });
+  };
+
   global.CGSSSkelParser = {
     parse: function (arrayBuffer) {
-      return new Parser(arrayBuffer).parse();
+      var bytes = new Uint8Array(arrayBuffer);
+      if (bytes.length < 44 || bytes[0] !== 0x1c) throw new Error('Invalid or incomplete CGSS skeleton header');
+      var header = new Reader(arrayBuffer);
+      header.pos = 0;
+      header.readString();
+      var version = header.readString();
+      if (header.pos + 9 !== 44) throw new Error('Unsupported CGSS skeleton header');
+      if (/^2\.1\./.test(version)) return new PetitParser(arrayBuffer).parse();
+      if (/^3\.6\./.test(version)) return new Parser(arrayBuffer).parse();
+      throw new Error('Unsupported Spine binary version: ' + version);
     }
   };
 })(typeof window !== 'undefined' ? window : globalThis);

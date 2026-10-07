@@ -142,6 +142,10 @@ int pager_picks(const char *title, dbdef *Def,sqlite3 *db,sqlite3 *rdb,int multi
 
     if(count < 1)
         return -2;
+    if(multi){
+        for(int i = 0; i < count; i++)
+            if(Def[i].state) n_state++;
+    }
     printf("\x1b[?25l");
     printf("\x1b[2J\x1b[H");
     while(1){

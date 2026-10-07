@@ -47,6 +47,7 @@ static int run_update_script(const wchar_t *wroot,
         "set \"TARGET_DIR=%~2\"\r\n"
         "set \"EXE_NAME=%~3\"\r\n"
         "set \"PARENT_PID=%~4\"\r\n"
+        "set \"UPDATE_MARKER=%TARGET_DIR%\\CGSS_ResourceTool.update-in-progress\"\r\n"
         "if \"%ROOT:~-1%\"==\"\\\" set \"ROOT=%ROOT:~0,-1%\"\r\n"
         "set \"SOURCE_DIR=%ROOT%\\updata\\CGSS_ResourceTool\"\r\n"
         "set \"UPDATE_TMP=%ROOT%\\updata\"\r\n"
@@ -62,13 +63,15 @@ static int run_update_script(const wchar_t *wroot,
         "timeout /t 1 /nobreak >NUL\r\n"
         "if not exist \"%SOURCE_DIR%\" (\r\n"
         "    echo 错误: 未找到新版本文件夹 %SOURCE_DIR%\r\n"
+        "    del /f /q \"%UPDATE_MARKER%\" >NUL 2>NUL\r\n"
         "    pause\r\n"
         "    exit /b 1\r\n"
         ")\r\n"
         "echo 正在替换程序文件...\r\n"
-        "robocopy \"%SOURCE_DIR%\" \"%TARGET_DIR%\" /E /NFL /NDL /NJH /NJS /R:3 /W:1\r\n"
+        "robocopy \"%SOURCE_DIR%\" \"%TARGET_DIR%\" /E /NFL /NDL /NJH /NJS /R:3 /W:1 /XF \"master.mdb\" \"master.mdb.sync\" \"master.mdb.sync.tmp\" \"master.mdb.lz4\" \"master.mdb.update\" \"master.mdb.update.sync\" \"master.mdb.update.sync.tmp\" \"manifest_*.db*\"\r\n"
         "if %ERRORLEVEL% GEQ 8 (\r\n"
         "    echo 替换过程中出现错误, 错误码: %ERRORLEVEL%\r\n"
+        "    del /f /q \"%UPDATE_MARKER%\" >NUL 2>NUL\r\n"
         "    pause\r\n"
         "    exit /b 1\r\n"
         ")\r\n"
@@ -76,10 +79,27 @@ static int run_update_script(const wchar_t *wroot,
         "if exist \"%ZIP_FILE%\" del /f /q \"%ZIP_FILE%\"\r\n"
         "echo 更新完成, 正在重启程序...\r\n"
         "start \"\" \"%TARGET_DIR%\\%EXE_NAME%\"\r\n"
+        "del /f /q \"%UPDATE_MARKER%\" >NUL 2>NUL\r\n"
         "(goto) 2>nul & del \"%~f0\"\r\n";
 
-    fputs(bat_content, f);
-    fclose(f);
+    int script_ok = fputs(bat_content, f) >= 0;
+    if (fclose(f) != 0) script_ok = 0;
+    if (!script_ok){
+        DeleteFileW(bat_path);
+        fprintf(stderr, "写入更新脚本失败\n");
+        return -1;
+    }
+
+    wchar_t marker_path[MAX_PATH];
+    swprintf(marker_path, _countof(marker_path),
+             L"%ls\\CGSS_ResourceTool.update-in-progress", target_dir);
+    HANDLE marker = CreateFileW(marker_path, GENERIC_WRITE, 0, NULL,
+                                CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (marker == INVALID_HANDLE_VALUE) {
+        fprintf(stderr, "无法创建更新交接标记: %lu\n", GetLastError());
+        return -1;
+    }
+    CloseHandle(marker);
 
     /* 构造 cmd.exe /c "bat路径" "根目录" "目标目录" "exe名" "PID" */
     wchar_t cmdline[MAX_PATH * 5];
@@ -105,7 +125,9 @@ static int run_update_script(const wchar_t *wroot,
     );
 
     if (!ok) {
-        fprintf(stderr, "启动更新脚本失败, 错误码: %lu\n", GetLastError());
+        DWORD error = GetLastError();
+        DeleteFileW(marker_path);
+        fprintf(stderr, "启动更新脚本失败, 错误码: %lu\n", error);
         return -1;
     }
 
@@ -215,6 +237,10 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
     wchar_t zippath[MAX_PATH];
     swprintf(zippath,_countof(zippath),L"%ls\\updata.zip",wroot);
     zip_file = _wfopen(zippath,L"wb");
+    if (!zip_file){
+        fprintf(stderr,"创建更新压缩包失败: %lu\n",GetLastError());
+        return -1;
+    }
     
     char utf8_wroot[512];
     wide_to_utf8(wroot,utf8_wroot,PATH_SIZE);
@@ -269,8 +295,22 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
         fprintf(stderr,"WinHttpSendRequest%lu错误",GetLastError());
         return -1;
     }
+    DWORD status = 0, status_size = sizeof(status);
+    if(!WinHttpQueryHeaders(hRequest,
+                            WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+                            WINHTTP_HEADER_NAME_BY_INDEX, &status, &status_size,
+                            WINHTTP_NO_HEADER_INDEX) || status != HTTP_STATUS_OK){
+        fprintf(stderr,"更新包 HTTP 状态异常: %lu\n",
+                (unsigned long)(status ? status : GetLastError()));
+        fclose(zip_file);
+        DeleteFileW(zippath);
+        WinHttpCloseHandle(hRequest);
+        WinHttpCloseHandle(hConnect);
+        return -1;
+    }
     int error_count = 0;
     LONGLONG total = 0;
+    DOWNERROR = 0;
     if(bResults){
         do{
             unsigned char  buf[131072]; //128k缓冲区
@@ -281,9 +321,7 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
                     printf("ERROR %u IN WINHTTPQUERYDATAAVAILABLE.\n",
                     GetLastError());
                     DOWNERROR = 1;
-                    total = 0;
-                    error_count++;
-                    fprintf(stderr,"第%d次下载失败...\n",(error_count++) + 1);
+                    error_count = 4;
                     break;
                 }
                 if(avail == 0){
@@ -292,17 +330,25 @@ static int down_file(Version_num *tag,wchar_t *wroot,size_t PATH_SIZE){
                 }
                 if(avail > sizeof buf)avail = sizeof buf;
                 if(!WinHttpReadData(hRequest,buf,avail,&got) || got == 0){
-                    DOWNERROR = 0;
+                    DOWNERROR = 1;
+                    error_count = 4;
                     break;
                 }
-                fwrite(buf, 1, got, zip_file);      /* 写盘 */
+                if(fwrite(buf, 1, got, zip_file) != got){
+                    DOWNERROR = 1;
+                    error_count = 4;
+                    break;
+                }
                 total += got;
             }
         }while(error_count <= 3 && DOWNERROR == 1);
         printf("下载完成: %lld KB\n", (long long)(total / 1024));
     }
-    fclose(zip_file);   //不管有没有下载完都关掉
-    if(DOWNERROR == 1){
+    int close_ok = fclose(zip_file) == 0;
+    WinHttpCloseHandle(hRequest);
+    WinHttpCloseHandle(hConnect);
+    if(DOWNERROR == 1 || total <= 0 || !close_ok){
+        DeleteFileW(zippath);
         fprintf(stderr,"下载失败\n");
         return -1;
     }

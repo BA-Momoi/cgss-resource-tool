@@ -7,6 +7,7 @@
 #include "unpack.h"
 
 #define MAX_FBX_ITEMS 256
+#define FBX_UNPACK_WORKERS 2
 typedef struct {
     wchar_t path[1100];
     wchar_t dir[1100];
@@ -34,15 +35,18 @@ static void scan_fbx_dir(const wchar_t *dir, FbxItem *items, int *n, const char 
     FindClose(h);
 }
 
-/* 把 outdir\sub\*.ext 复制到 dest */
-
-static int extract_one(const FbxItem *it, int idx){
-    wchar_t exedir[1024], outdir[1200];
+static void make_outdir(int idx, wchar_t *outdir, size_t outdir_cap){
+    wchar_t exedir[1024];
     GetModuleFileNameW(NULL, exedir, 1024);
     wchar_t *p = wcsrchr(exedir, L'\\');
     if (p) *p = 0;
     /* 输出目录必须 ASCII，避免日文路径传给 .NET CLI 出错 */
-    swprintf(outdir, 1200, L"%ls\\AssetStudio_out\\p%03d", exedir, idx);
+    swprintf(outdir, outdir_cap, L"%ls\\AssetStudio_out\\p%03d", exedir, idx);
+}
+
+static int run_assetstudio(const FbxItem *it, int idx){
+    wchar_t outdir[1200];
+    make_outdir(idx, outdir, 1200);
     wipe_dir(outdir);
     mkdirs(outdir);
 
@@ -64,8 +68,19 @@ static int extract_one(const FbxItem *it, int idx){
         return 0;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    if (exit_code != 0){
+        printf("AssetStudio.CLI 解包失败，退出码 %lu\n", (unsigned long)exit_code);
+        return 0;
+    }
+    return 1;
+}
+
+/* 把 outdir\\sub\\*.ext 复制到 dest */
+static int copy_assetstudio_outputs(const FbxItem *it, const wchar_t *outdir){
 
     int n = 0;
     n += copy_dir(outdir, L"Animator", it->dir, L"*.fbx");
@@ -94,6 +109,53 @@ static int extract_one(const FbxItem *it, int idx){
     if (n == 0) printf("  未生成可复制文件（可能包里没有网格/贴图/动画）\n");
     printf("  完成，复制 %d 个文件\n", n);
     return n;
+}
+
+static int extract_one(const FbxItem *it, int idx){
+    wchar_t outdir[1200];
+    if (!run_assetstudio(it, idx)) return 0;
+    make_outdir(idx, outdir, 1200);
+    return copy_assetstudio_outputs(it, outdir);
+}
+
+typedef struct {
+    const FbxItem *items;
+    const int *selected;
+    int count;
+    volatile LONG next;
+    int *processed;
+} FbxQueue;
+
+static DWORD WINAPI fbx_unpack_worker(LPVOID param){
+    FbxQueue *queue = (FbxQueue*)param;
+    for (;;){
+        LONG task = InterlockedIncrement(&queue->next) - 1;
+        if (task < 0 || task >= queue->count) break;
+        queue->processed[task] = run_assetstudio(&queue->items[queue->selected[task]], (int)task);
+    }
+    return 0;
+}
+
+static void run_selected_assetstudio(const FbxItem *items, const int *selected, int count,
+                                     int *processed){
+    FbxQueue queue = {items, selected, count, -1, processed};
+    if (count <= 1){
+        fbx_unpack_worker(&queue);
+        return;
+    }
+    HANDLE workers[FBX_UNPACK_WORKERS];
+    unsigned started = 0;
+    unsigned worker_count = (unsigned)(count < FBX_UNPACK_WORKERS ? count : FBX_UNPACK_WORKERS);
+    for (; started < worker_count; started++){
+        workers[started] = CreateThread(NULL, 0, fbx_unpack_worker, &queue, 0, NULL);
+        if (!workers[started]) break;
+    }
+    if (started == 0){
+        fbx_unpack_worker(&queue);
+        return;
+    }
+    WaitForMultipleObjects(started, workers, TRUE, INFINITE);
+    for (unsigned i = 0; i < started; i++) CloseHandle(workers[i]);
 }
 
 
@@ -165,8 +227,14 @@ int unpack_fbx_main(void){
     }
     if (nsel == 0) return 1;
 
+    int processed[MAX_FBX_ITEMS] = {0};
+    run_selected_assetstudio(items, sel, nsel, processed);
     for (int s = 0; s < nsel; s++){
-        extract_one(&items[sel[s] - 1], s);
+        if (processed[s]){
+            wchar_t outdir[1200];
+            make_outdir(s, outdir, 1200);
+            copy_assetstudio_outputs(&items[sel[s] - 1], outdir);
+        }
     }
     printf("全部完成\n");
     return 0;
