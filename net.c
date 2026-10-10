@@ -266,7 +266,7 @@ int dl_many(const DlTask *tasks, size_t count){
     if (count > LONG_MAX) return -1;
 
     unsigned worker_count = (unsigned)(count < 4 ? count : 4);
-    DlQueue queue = {tasks, count, -1, 0};
+    DlQueue queue = {tasks, count, 0, 0};
     HANDLE workers[4];
     unsigned started = 0;
     for (; started < worker_count; started++){
