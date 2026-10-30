@@ -129,13 +129,17 @@ int pager_pick(const char *title, def *Def,int multi){
     }
     return n_state;
 }
-/* 支持传入双sqlite3 参数函数和 Def*/
+/* 双数据库菜单选择器。
+ * multi=0 时菜单为单选，Enter 会调用当前项的 func(db,rdb)；
+ * multi=1 时菜单为多选，Space/A 更新每行的 state，Enter 保留勾选结果供调用者读取。
+ * 对 browse.c 的候选菜单而言，Def[].state 是“显示层的勾选状态”，业务 ID 仍由调用方的行号映射表保存。
+ */
 int pager_picks(const char *title, dbdef *Def,sqlite3 *db,sqlite3 *rdb,int multi){
-    int count = 0;
-    int sel = 0;
-    int pager_row = console_rows() - 4;
+    int count = 0; /* Def 中 END 哨兵之前的有效菜单行数 */
+    int sel = 0; /* 当前光标所指的全局行号；翻页只改变显示窗口，不改变此索引 */
+    int pager_row = console_rows() - 4; /* 扣除标题/按键说明等行后，每页显示的选项数 */
     if(pager_row < 1) pager_row = 1;
-    int n_state = 0;
+    int n_state = 0; /* 当前 state 为非零的行数；在多选菜单顶部显示 */
     for(int i = 0;!(strcmp(Def[i].name,"END") == 0); i++){
         count++;
     }
@@ -150,10 +154,10 @@ int pager_picks(const char *title, dbdef *Def,sqlite3 *db,sqlite3 *rdb,int multi
     printf("\x1b[2J\x1b[H");
     while(1){
         printf("\x1b[2J\x1b[H");
-        int pager = sel / pager_row;
-        int ps = pager * pager_row;
-        int pe = ps + pager_row - 1;
-        int total_pages = (count + pager_row - 1) / pager_row;
+        int pager = sel / pager_row; /* 当前光标所在页，页码从 0 开始计算 */
+        int ps = pager * pager_row; /* 当前页第一条菜单行 */
+        int pe = ps + pager_row - 1; /* 当前页最后一条行，下面会限制到 count-1 */
+        int total_pages = (count + pager_row - 1) / pager_row; /* 向上取整，保证末页也计入 */
         if(pe > count -1) pe = count - 1;
         if(multi){
             printf("%s   [第%d页/%d页] 已选%d ↑↓选择  Space勾选  A全选/全不选  PgUp/PgDn翻页  Enter确认  Esc取消\n\n",title,pager + 1,total_pages,n_state);

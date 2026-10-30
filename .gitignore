@@ -58,8 +58,7 @@ Thumbs.db
 /translation-resources/
 
 # 本地 APK 分析数据；保留可复用脚本
-/apk-analysis/*
-!/apk-analysis/copy-installed-apk.ps1
+apk-analysis/
 
 # 本地文档（master_mdb 手册 / cysp 说明等，不随发布上传）
 docs/

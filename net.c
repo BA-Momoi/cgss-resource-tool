@@ -243,18 +243,18 @@ int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
 }
 
 typedef struct {
-    const DlTask *tasks;
-    size_t count;
-    volatile LONG next;
-    volatile LONG successes;
+    const DlTask *tasks;       /* 共享只读任务数组；任务内字符串由调用者保持到所有 worker 结束 */
+    size_t count;              /* tasks 的有效元素数 */
+    volatile LONG next;        /* 原子领取任务的计数器；InterlockedIncrement 后减 1 得到下标 */
+    volatile LONG successes;   /* 原子累计 dl_one 成功次数，作为 dl_many 返回值 */
 } DlQueue;
 
 static DWORD WINAPI dl_worker(LPVOID param){
-    DlQueue *queue = (DlQueue*)param;
+    DlQueue *queue = (DlQueue*)param; /* 所有 worker 共享的任务队列，栈对象在 dl_many 等待期间有效 */
     for (;;){
-        LONG index = InterlockedIncrement(&queue->next) - 1;
+        LONG index = InterlockedIncrement(&queue->next) - 1; /* 原子领取一个唯一任务编号 */
         if (index < 0 || (size_t)index >= queue->count) break;
-        const DlTask *task = &queue->tasks[index];
+        const DlTask *task = &queue->tasks[index]; /* 本线程负责的 name/hash/save_dir 三元组 */
         if (dl_one(task->name, task->hash, task->save_dir) == 0)
             InterlockedIncrement(&queue->successes);
     }
@@ -265,10 +265,10 @@ int dl_many(const DlTask *tasks, size_t count){
     if (!tasks || count == 0) return 0;
     if (count > LONG_MAX) return -1;
 
-    unsigned worker_count = (unsigned)(count < 4 ? count : 4);
-    DlQueue queue = {tasks, count, 0, 0};
-    HANDLE workers[4];
-    unsigned started = 0;
+    unsigned worker_count = (unsigned)(count < 4 ? count : 4); /* 小任务集不多建线程，最大四个 worker */
+    DlQueue queue = {tasks, count, 0, 0}; /* next=0，首个原子领取会得到任务下标 0 */
+    HANDLE workers[4]; /* 已成功创建的 Windows 线程句柄 */
+    unsigned started = 0; /* workers 中实际创建的线程数量 */
     for (; started < worker_count; started++){
         workers[started] = CreateThread(NULL, 0, dl_worker, &queue, 0, NULL);
         if (!workers[started]) break;

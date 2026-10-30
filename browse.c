@@ -9,6 +9,22 @@
  *  - 歌曲: 歌名模糊 或 歌曲id
  *  - 卡片: 卡名/角色名模糊 或 卡id/角色id
  *  - 语音: 卡名模糊 或 卡id
+ *
+ * 卡片选择调用链:
+ *   browse_main -> pager_picks(一级菜单) -> browse_card
+ *       -> choose_cards(SQL 搜索) -> pick_rows(生成候选项并显示)
+ *       -> 返回 card_id -> 查询卡片/角色/服装信息
+ *       -> add_res(资源名查 manifest hash) -> pager_picks(资源多选)
+ *       -> collect(勾选项下标) -> download_selected
+ *       -> net.c:dl_many -> net.c:dl_one
+ *
+ * 3D 模型选择链:
+ *   browse_main -> pager_picks(一级菜单) -> browse_model
+ *       -> choose_model_cards(SQL 搜索) -> pick_model_rows(显示 card/chara/dress)
+ *       -> 返回 card_id -> 查询 open_dress_id 并拼装 3D 包名
+ *       -> add_res -> pick_and_download -> download_selected
+ *       -> net.c:dl_many -> net.c:dl_one
+ * pager_picks 在 paper.c 中负责绘制列表与维护 dbdef.state；下载层最终拿到的是资源 name/hash/save_dir。
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -25,26 +41,26 @@
 #include "sticker.h"
 #include "stage_map.h"
 
-#define DB_PATH "master.mdb"
-#define MAX_ITEMS 1024
-#define DOWNLOAD_BATCH_SIZE 64
+#define DB_PATH "master.mdb"          /* 卡片、角色、歌曲等主数据所在的数据库文件 */
+#define MAX_ITEMS 1024                 /* 单次查询最多保留的待选资源数 */
+#define DOWNLOAD_BATCH_SIZE 64         /* 每批交给下载器的最大任务数，避免栈上数组过大 */
 
 /* 一条可下载资源 */
 typedef struct {
-    char disp[128];      /* pager 里显示的名字 */
-    char name[256];      /* 清单里的资源名 */
-    char hash[64];
-    wchar_t sub[64];     /* CGSS_DOWN 下的子目录 */
+    char disp[128];      /* 选择菜单显示文本；通常与资源名相同 */
+    char name[256];      /* manifest 中的资源文件名，也是下载/CDN 路径分类依据 */
+    char hash[64];       /* manifest 中该资源对应的 CDN 内容哈希 */
+    wchar_t sub[64];     /* 保存目录名；最终落在 CGSS_DOWN\\<对象目录>\\<sub> */
 } BItem;
 
-/* 查资源名对应的 hash, 成功返回 0 */
+/* 查资源名对应的 manifest hash；找到返回 0，SQL 失败或资源不存在返回 -1。 */
 static int get_hash(sqlite3 *rdb, const char *name, char *hash_out, int n){
-    sqlite3_stmt *stmt = NULL;
+    sqlite3_stmt *stmt = NULL; /* SQLite 查询对象，查询完成后必须 finalize */
     if (sqlite3_prepare_v2(rdb, "SELECT hash FROM manifests WHERE name=?",
                            -1, &stmt, NULL) != SQLITE_OK)
         return -1;
     sqlite3_bind_text(stmt, 1, name, -1, SQLITE_TRANSIENT);
-    int rc = -1;
+    int rc = -1; /* 默认表示未找到；查到资源行后改为 0 */
     if (sqlite3_step(stmt) == SQLITE_ROW){
         snprintf(hash_out, n, "%s", (const char*)sqlite3_column_text(stmt, 0));
         rc = 0;
@@ -53,10 +69,11 @@ static int get_hash(sqlite3 *rdb, const char *name, char *hash_out, int n){
     return rc;
 }
 
-/* 已知资源名 -> 加入待选列表(清单里没有就提示跳过) */
+/* 已知资源名 -> 加入待选资源列表；manifest 中没有的资源提示后跳过。 */
 static int add_res(sqlite3 *rdb, BItem *items, int *n,
                    const char *name, const wchar_t *sub){
     if (*n >= MAX_ITEMS) return 0;
+    /* 同一资源名与保存子目录组合只保留一项，避免菜单和下载重复。 */
     for (int i = 0; i < *n; i++)
         if (strcmp(items[i].name, name) == 0 && wcscmp(items[i].sub, sub) == 0)
             return 0;
@@ -71,7 +88,7 @@ static int add_res(sqlite3 *rdb, BItem *items, int *n,
     return 1;
 }
 
-/* 把待选列表转成 pager 用的 dbdef 数组(tmp 需要 n+1 项, 最后一行 END) */
+/* 把 BItem 映射成 pager_picks 使用的 dbdef；tmp 必须预留 n+1 格放 END 哨兵。 */
 static void make_menu(dbdef *tmp, BItem *items, int n){
     if (n < 0) n = 0;
     if (n > MAX_ITEMS) n = MAX_ITEMS;
@@ -85,7 +102,7 @@ static void make_menu(dbdef *tmp, BItem *items, int n){
     tmp[n].state = 0;
 }
 
-/* 收集 pager 里勾选的下标, 返回个数 */
+/* 从 dbdef.state 收集用户勾选的资源下标；返回下标个数而不是成功下载数。 */
 static int collect(const dbdef *tmp, int n, int *picked){
     int c = 0;
     for (int i = 0; i < n; i++)
@@ -99,7 +116,7 @@ static int is_sticker_resource(const char *name)
     return name && strncmp(name, prefix, sizeof(prefix) - 1) == 0;
 }
 
-/* 下载一条到 wroot\sub；贴纸下载成功后立即进入统一后处理流程。 */
+/* 下载一条资源到 wroot\sub；贴纸走专用目录并在下载后立即解包/转换。 */
 static int download_item(const BItem *it, const wchar_t *wroot){
     wchar_t wsub[1300];
 
@@ -130,18 +147,18 @@ static int download_item(const BItem *it, const wchar_t *wroot){
 static int download_selected(BItem *items, const int *picked, int count,
                              const wchar_t *wroot){
     if (count <= 0) return 0;
-    int succeeded = 0;
+    int succeeded = 0; /* dl_many 返回的成功数；贴纸单项成功也计入此数 */
     for (int base = 0; base < count; base += DOWNLOAD_BATCH_SIZE){
-        int batch_count = count - base;
+        int batch_count = count - base; /* 当前批还剩多少个用户选择项 */
         if (batch_count > DOWNLOAD_BATCH_SIZE) batch_count = DOWNLOAD_BATCH_SIZE;
-        DlTask tasks[DOWNLOAD_BATCH_SIZE];
-        wchar_t dirs[DOWNLOAD_BATCH_SIZE][1300];
-        int stickers[DOWNLOAD_BATCH_SIZE];
-        int ntasks = 0, nsticker = 0;
+        DlTask tasks[DOWNLOAD_BATCH_SIZE]; /* 发给通用并发下载器的非贴纸任务 */
+        wchar_t dirs[DOWNLOAD_BATCH_SIZE][1300]; /* 与 tasks 一一对应，目录需活到 dl_many 返回 */
+        int stickers[DOWNLOAD_BATCH_SIZE]; /* 本批中需专用后处理的贴纸 items 下标 */
+        int ntasks = 0, nsticker = 0; /* 两种任务分别计数 */
 
         for (int i = 0; i < batch_count; i++){
-            int index = picked ? picked[base + i] : base + i;
-            BItem *item = &items[index];
+            int index = picked ? picked[base + i] : base + i; /* picked 为 NULL 时顺序处理整个 items */
+            BItem *item = &items[index]; /* 勾选下标映射回资源名、hash 与目标子目录 */
             if (is_sticker_resource(item->name)){
                 stickers[nsticker++] = index;
                 continue;
@@ -212,7 +229,7 @@ static void make_dl_folder(int id, const char *name, wchar_t *wfolder, int n){
     mkdirs(wfolder);
 }
 
-/* 通用结尾: 多选 -> 批量下载到 wfolder */
+/* 通用资源选择结尾：建立资源菜单、接收勾选，再将实际下载交给 download_selected。 */
 static int pick_and_download_default(const char *title, sqlite3 *db,
                                      sqlite3 *rdb, BItem *items, int n,
                                      const wchar_t *wfolder, int select_all){
@@ -222,9 +239,9 @@ static int pick_and_download_default(const char *title, sqlite3 *db,
     make_menu(tmp, items, n);
     if (select_all)
         for (int i = 0; i < n; i++) tmp[i].state = 1;
-    int rc = pager_picks(title, tmp, db, rdb, 1);
+    int rc = pager_picks(title, tmp, db, rdb, 1); /* 多选：返回勾选数；Esc 返回 -1 */
     if (rc <= 0){ if (rc == -1) printf("已取消\n"); return 0; }
-    int c = collect(tmp, n, picked);
+    int c = collect(tmp, n, picked); /* c 是待下载数，picked[] 保存 items[] 下标 */
     int downloaded = download_selected(items, picked, c, wfolder);
     printf("共下载 %d/%d 个 -> %ls\n", downloaded, c, wfolder);
     return c;
@@ -681,32 +698,33 @@ static int browse_action(sqlite3 *db, sqlite3 *rdb){
 
 /* 3D模型: 按卡名/角色名/id 找卡, 再列出模型资源 */
 static int browse_model(sqlite3 *db, sqlite3 *rdb){
-    int ids[64];
-    int nids = choose_model_cards(db, ids, 64);
+    int ids[64]; /* 选择器返回的 card_data.id；不是 chara_id/dress_id */
+    int nids = choose_model_cards(db, ids, 64); /* 多结果时调用 pick_model_rows 显示三个 ID 字段 */
     if (nids <= 0) return 0;
     for (int s = 0; s < nids; s++){
-        int card_id = ids[s];
-        sqlite3_stmt *stmt = NULL;
+        int card_id = ids[s]; /* 当前所选卡片主键，用它回查模型映射字段 */
+        sqlite3_stmt *stmt = NULL; /* card_data 查询句柄 */
         if (sqlite3_prepare_v2(db,
                 "SELECT id,name,chara_id,open_dress_id FROM card_data WHERE id=?",
                 -1, &stmt, NULL) != SQLITE_OK)
             continue;
         sqlite3_bind_int(stmt, 1, card_id);
         if (sqlite3_step(stmt) != SQLITE_ROW){ sqlite3_finalize(stmt); continue; }
-        char cname[128];
+        char cname[128]; /* 创建该卡专用的本地下载目录 */
         snprintf(cname, sizeof cname, "%s",
                  (const char*)sqlite3_column_text(stmt, 1));
-        int chara_id = sqlite3_column_int(stmt, 2);
-        int dress_id = sqlite3_column_int(stmt, 3);
+        int chara_id = sqlite3_column_int(stmt, 2); /* 专属头部资源名中的角色 ID */
+        int dress_id = sqlite3_column_int(stmt, 3); /* 专属身体与纹理资源名中的服装 ID */
         sqlite3_finalize(stmt);
         printf("\n========== %d|%s | chara_id=%d", card_id, cname, chara_id);
         if (dress_id > 0) printf(" | dress_id=%d", dress_id);
         printf(" 的3D模型 ==========\n");
 
-        static BItem items[MAX_ITEMS];
-        int n = 0;
-        char res[256];
+        static BItem items[MAX_ITEMS]; /* 本卡在 manifest 中存在的身体、头部和材质包 */
+        int n = 0; /* 已加入的模型文件数 */
+        char res[256]; /* 构造并查询每个模型 manifest 名称 */
         if (dress_id > 0){
+            /* HQ 身体/头部优先，若清单没有 HQ 文件则回退到普通质量版本。 */
             snprintf(res, sizeof res, "3d_chara_body_%04d.unity3d", dress_id);
             add_res(rdb, items, &n, res, L"3D模型");
             snprintf(res, sizeof res, "3d_chara_head_%04d_%04d_hq.unity3d",
@@ -719,7 +737,7 @@ static int browse_model(sqlite3 *db, sqlite3 *rdb){
             if (get_hash(rdb, res, items[n].hash, 64) != 0)
                 snprintf(res, sizeof res, "3d_md_body%04d.unity3d", dress_id);
             add_res(rdb, items, &n, res, L"3D模型");
-            const char *tx[3] = {"hq","multi","spec"};
+            const char *tx[3] = {"hq","multi","spec"}; /* 服装身体纹理材质包后缀 */
             for (int i = 0; i < 3; i++){
                 snprintf(res, sizeof res, "3d_tx_body%04d_%s.unity3d",
                          dress_id, tx[i]);
@@ -728,9 +746,9 @@ static int browse_model(sqlite3 *db, sqlite3 *rdb){
         } else {
             printf("该卡没有专属服装, 没有3D模型\n");
         }
-        wchar_t wfolder[1024];
+        wchar_t wfolder[1024]; /* CGSS_DOWN 下该 card_id+卡名的 Unicode 下载目录 */
         make_dl_folder(card_id, cname, wfolder, 1024);
-        char title[256];
+        char title[256]; /* 第二层资源菜单标题，显示当前选中卡及其角色/服装 ID */
         if (dress_id > 0)
             snprintf(title, sizeof title,
                      "3D模型资源 [card_id=%d chara_id=%d dress_id=%d] (空格勾选, Enter下载)",
@@ -739,7 +757,7 @@ static int browse_model(sqlite3 *db, sqlite3 *rdb){
             snprintf(title, sizeof title,
                      "3D模型资源 [card_id=%d chara_id=%d] (空格勾选, Enter下载)",
                      card_id, chara_id);
-        pick_and_download(title, db, rdb, items, n, wfolder);
+        pick_and_download(title, db, rdb, items, n, wfolder); /* 再让用户选择模型包，之后进入统一下载链 */
     }
     return 0;
 }
@@ -1068,9 +1086,9 @@ static int browse_cg(sqlite3 *db, sqlite3 *rdb){
 /* 把查询结果(id,name)列出多选, 选中的 id 写入 out, 返回个数
  * 只有一条结果时自动选中, 不用按空格 */
 static int pick_rows(sqlite3_stmt *stmt, int *out, int max){
-    static int row_ids[512];
-    static dbdef tmp[513];
-    int n = 0;
+    static int row_ids[512]; /* 暂存查询每行第 0 列的对象 ID，与菜单行号一一对应 */
+    static dbdef tmp[513]; /* 多选显示用数组；末尾一格放 pager 要求的 END */
+    int n = 0; /* SQL 实际读入候选记录条数 */
     while (sqlite3_step(stmt) == SQLITE_ROW && n < 512){
         row_ids[n] = sqlite3_column_int(stmt, 0);
         snprintf(tmp[n].name, sizeof tmp[n].name, "%d | %s", row_ids[n],
@@ -1086,13 +1104,51 @@ static int pick_rows(sqlite3_stmt *stmt, int *out, int max){
     snprintf(tmp[n].name, sizeof tmp[n].name, "END");
     tmp[n].func = NULL;
     tmp[n].state = 0;
-    int rc = pager_picks("搜索结果(空格勾选, Enter确认)", tmp, NULL, NULL, 1);
+    int rc = pager_picks("搜索结果(空格勾选, Enter确认)", tmp, NULL, NULL, 1); /* rc 为勾选数，Esc 时为 -1 */
     if (rc <= 0) return 0;
-    int c = 0;
+    int c = 0; /* 已复制到 out[] 的 ID 数量，最多 max 个 */
     for (int i = 0; i < n && c < max; i++)
         if (tmp[i].state) out[c++] = row_ids[i];
     return c;
 }
+
+/* ================== 第一级选择: 增加服装,角色显示的"查对象" ================== */
+
+/* 把查询结果(id,name)列出多选, 选中的 id 写入 out, 返回个数
+ * 只有一条结果时自动选中, 不用按空格 */
+static int pick_rows_id(sqlite3_stmt* stmt, int* out, int max) {
+    static int row_ids[512]; /* 暂存查询每行第 0 列的对象 ID，与菜单行号一一对应 */
+    static dbdef tmp[513]; /* 多选显示用数组；末尾一格放 pager 要求的 END */
+    int n = 0; /* SQL 实际读入候选记录条数 */
+    while (sqlite3_step(stmt) == SQLITE_ROW && n < 512) {
+        row_ids[n] = sqlite3_column_int(stmt, 0);
+        if (sqlite3_column_int(stmt, 3) > 0) {
+            snprintf(tmp[n].name, sizeof tmp[n].name, "%d | chara_id=%d | dress_id=%d | %s", row_ids[n],sqlite3_column_int(stmt,2),sqlite3_column_int(stmt,3),
+                (const char*)sqlite3_column_text(stmt, 1));
+        }
+        else {
+            snprintf(tmp[n].name, sizeof tmp[n].name, "%d | chara_id=%d | %s", row_ids[n], sqlite3_column_int(stmt, 2),
+            (const char*)sqlite3_column_text(stmt, 1));
+        }
+        tmp[n].func = NULL;
+        tmp[n].state = 0;
+        n++;
+    }
+    sqlite3_finalize(stmt);
+    if (n == 0) { printf("没有匹配的记录\n"); return 0; }
+    if (n == 1) { out[0] = row_ids[0]; return 1; }
+
+    snprintf(tmp[n].name, sizeof tmp[n].name, "END");
+    tmp[n].func = NULL;
+    tmp[n].state = 0;
+    int rc = pager_picks("搜索结果(空格勾选, Enter确认)", tmp, NULL, NULL, 1); /* rc 为勾选数，Esc 时为 -1 */
+    if (rc <= 0) return 0;
+    int c = 0; /* 已复制到 out[] 的 ID 数量，最多 max 个 */
+    for (int i = 0; i < n && c < max; i++)
+        if (tmp[i].state) out[c++] = row_ids[i];
+    return c;
+}
+
 
 /* 选歌曲: 输入歌名(模糊)或歌曲id */
 static int choose_songs(sqlite3 *db, int *ids, int max){
@@ -1129,29 +1185,30 @@ static int choose_songs(sqlite3 *db, int *ids, int max){
     return pick_rows(stmt, ids, max);
 }
 
-/* 选卡片: 输入卡名/角色名(模糊)或 卡id/角色id */
+/* 卡片和 Spine/语音共用的选择器：输入卡名/角色名模糊词、卡 ID 或角色 ID。
+ * 返回值是选中卡片数，ids[] 中存的是 card_data.id，不是 chara_id。 */
 static int choose_cards(sqlite3 *db, int *ids, int max){
-    char buf[128];
+    char buf[128]; /* 搜索文本；数字走 ID 分支，其它内容走名称 LIKE 分支 */
     printf("输入卡名/角色名(模糊)或id: ");
     if (fgets(buf, sizeof buf, stdin) == NULL) return 0;
     buf[strcspn(buf, "\r\n")] = 0;
     if (!buf[0]) return 0;
 
-    sqlite3_stmt *stmt = NULL;
+    sqlite3_stmt *stmt = NULL; /* 参数化查询；传给 pick_rows 后由该函数 finalize */
     if (isdigit((unsigned char)buf[0])){
-        int nid = atoi(buf);
+        int nid = atoi(buf); /* 通用卡片选择器按首字符判断数字，再转换成 int */
         /* 先按卡id查, 查不到再按角色id查 */
-        if (sqlite3_prepare_v2(db, "SELECT id,name FROM card_data WHERE id=?",
+        if (sqlite3_prepare_v2(db, "SELECT id, name, chara_id, open_dress_id FROM card_data WHERE id=?",
                                -1, &stmt, NULL) == SQLITE_OK){
             sqlite3_bind_int(stmt, 1, nid);
-            int r = pick_rows(stmt, ids, max);
+            int r = pick_rows_id(stmt, ids, max);
             if (r > 0) return r;
         }
         if (sqlite3_prepare_v2(db,
-                "SELECT c.id,c.name FROM card_data c WHERE c.chara_id=? ORDER BY c.id",
+                "SELECT id, name, chara_id, open_dress_id FROM card_data WHERE chara_id = ? ORDER BY id",
                 -1, &stmt, NULL) == SQLITE_OK){
             sqlite3_bind_int(stmt, 1, nid);
-            return pick_rows(stmt, ids, max);
+            return pick_rows_id(stmt, ids, max);
         }
         return 0;
     }
@@ -1159,7 +1216,7 @@ static int choose_cards(sqlite3 *db, int *ids, int max){
     char like[256];
     snprintf(like, sizeof like, "%%%s%%", buf);
     if (sqlite3_prepare_v2(db,
-            "SELECT c.id,c.name FROM card_data c WHERE c.name LIKE ? "
+            "SELECT id, name, chara_id, open_dress_id FROM card_data c WHERE c.name LIKE ? "
             "OR c.chara_id IN (SELECT chara_id FROM chara_data WHERE name LIKE ?) "
             "ORDER BY c.id",
             -1, &stmt, NULL) != SQLITE_OK){
@@ -1168,19 +1225,20 @@ static int choose_cards(sqlite3 *db, int *ids, int max){
     }
     sqlite3_bind_text(stmt, 1, like, -1, SQLITE_TRANSIENT);
     sqlite3_bind_text(stmt, 2, like, -1, SQLITE_TRANSIENT);
-    return pick_rows(stmt, ids, max);
+    return pick_rows_id(stmt, ids, max);
 }
 
-/* 3D模型搜索结果需要在卡片行中显示角色ID及可用的服装ID。 */
+/* 3D 模型候选显示器：SQL 列 0/1/2/3 分别为 card_id/name/chara_id/dress_id。
+ * 用户最终选中后仍只回传 card_id；模型包名要由 card_data 的角色/服装 ID 推导。 */
 static int pick_model_rows(sqlite3_stmt *stmt, int *out, int max){
-    static int row_ids[512];
-    static dbdef tmp[513];
-    int n = 0;
+    static int row_ids[512]; /* pager 行对应的 card_id，勾选时按相同下标取回 */
+    static dbdef tmp[513]; /* 显示 card_id/chara_id/dress_id/卡名的多选菜单 */
+    int n = 0; /* 展示的候选卡数量；最多 512 行 */
     while (sqlite3_step(stmt) == SQLITE_ROW && n < 512){
-        int card_id = sqlite3_column_int(stmt, 0);
-        int chara_id = sqlite3_column_int(stmt, 2);
-        int dress_id = sqlite3_column_int(stmt, 3);
-        const char *name = (const char*)sqlite3_column_text(stmt, 1);
+        int card_id = sqlite3_column_int(stmt, 0); /* 后续传给 browse_model 的卡片主键 */
+        int chara_id = sqlite3_column_int(stmt, 2); /* 用于解释和构造专属头部资源名 */
+        int dress_id = sqlite3_column_int(stmt, 3); /* open_dress_id；大于 0 才有专属 3D 包组 */
+        const char *name = (const char*)sqlite3_column_text(stmt, 1); /* 卡名，仅供候选行显示 */
         row_ids[n] = card_id;
         if (dress_id > 0)
             snprintf(tmp[n].name, sizeof tmp[n].name,
@@ -1204,7 +1262,7 @@ static int pick_model_rows(sqlite3_stmt *stmt, int *out, int max){
     int rc = pager_picks("3D模型搜索结果(空格勾选, Enter确认)",
                          tmp, NULL, NULL, 1);
     if (rc <= 0) return 0;
-    int c = 0;
+    int c = 0; /* 按勾选状态复制 card_id 到 out[]，最多写入 max 项 */
     for (int i = 0; i < n && c < max; i++)
         if (tmp[i].state) out[c++] = row_ids[i];
     return c;
@@ -1213,17 +1271,17 @@ static int pick_model_rows(sqlite3_stmt *stmt, int *out, int max){
 static int read_model_search_term(char *buf, size_t cap){
     if (!buf || cap < 2) return 0;
 
-    HANDLE input = GetStdHandle(STD_INPUT_HANDLE);
-    DWORD mode = 0;
+    HANDLE input = GetStdHandle(STD_INPUT_HANDLE); /* Windows 标准输入句柄 */
+    DWORD mode = 0; /* GetConsoleMode 成功说明输入来自真实控制台，可调用 ReadConsoleW */
     if (input != INVALID_HANDLE_VALUE && GetConsoleMode(input, &mode)){
-        wchar_t wide[256];
-        DWORD count = 0;
+        wchar_t wide[256]; /* 直接以 UTF-16 读取日文/中文卡名和角色名 */
+        DWORD count = 0; /* ReadConsoleW 读到的 UTF-16 字符数 */
         if (!ReadConsoleW(input, wide, (DWORD)(sizeof wide / sizeof wide[0] - 1),
                           &count, NULL))
             return 0;
         while (count > 0 && (wide[count - 1] == L'\r' || wide[count - 1] == L'\n'))
             count--;
-        int bytes = count == 0 ? 0 : WideCharToMultiByte(
+        int bytes = count == 0 ? 0 : WideCharToMultiByte( /* 查询数据库前将 UTF-16 转成 SQLite 所用 UTF-8 */
             CP_UTF8, 0, wide, (int)count, buf, (int)cap - 1, NULL, NULL);
         if (count > 0 && bytes <= 0) return 0;
         buf[bytes] = 0;
@@ -1235,16 +1293,17 @@ static int read_model_search_term(char *buf, size_t cap){
     return 1;
 }
 
-/* 选3D模型卡片: 沿用通用卡片的卡名/角色名/卡id/角色id匹配规则。 */
+/* 3D 模型菜单的卡片选择器。匹配规则与 choose_cards 相同，但查询额外读取
+ * chara_id/open_dress_id 用于列表显示；数字严格解析，优先按卡 ID、再按角色 ID 查。 */
 static int choose_model_cards(sqlite3 *db, int *ids, int max){
-    char buf[128];
+    char buf[128]; /* read_model_search_term 返回的 UTF-8 搜索词 */
     printf("输入卡名/角色名(模糊)或id: ");
     if (!read_model_search_term(buf, sizeof buf)) return 0;
     if (!buf[0]) return 0;
 
-    sqlite3_stmt *stmt = NULL;
-    int nid = 0;
-    int numeric = parse_decimal_id(buf, &nid);
+    sqlite3_stmt *stmt = NULL; /* 当前执行的 card_data 参数化查询 */
+    int nid = 0; /* 数字输入解析结果；依次作为 card_id 和 chara_id 使用 */
+    int numeric = parse_decimal_id(buf, &nid); /* 1=合法数字，0=名称，-1=整数超出范围 */
     if (numeric != 0){
         if (numeric < 0){
             printf("卡片/角色ID超出有效范围\n");
@@ -1254,7 +1313,7 @@ static int choose_model_cards(sqlite3 *db, int *ids, int max){
                 "SELECT id,name,chara_id,open_dress_id FROM card_data WHERE id=?",
                 -1, &stmt, NULL) == SQLITE_OK){
             sqlite3_bind_int(stmt, 1, nid);
-            int r = pick_model_rows(stmt, ids, max);
+            int r = pick_model_rows(stmt, ids, max); /* 卡 ID 命中时只展示该卡 */
             if (r > 0) return r;
         }
         if (sqlite3_prepare_v2(db,
@@ -1384,13 +1443,13 @@ static int browse_song(sqlite3 *db, sqlite3 *rdb){
 /* ================== 卡片 ================== */
 
 static int browse_card(sqlite3 *db, sqlite3 *rdb){
-    int ids[64];
-    int nids = choose_cards(db, ids, 64);
+    int ids[64]; /* choose_cards 回传的 card_data.id；最多一次处理 64 张卡 */
+    int nids = choose_cards(db, ids, 64); /* 卡片名/角色名/ID 搜索与候选显示在此函数内完成 */
     if (nids <= 0) return 0;
 
     for (int s = 0; s < nids; s++){
-        int card_id = ids[s];
-        sqlite3_stmt *stmt = NULL;
+        int card_id = ids[s]; /* 当前卡的数据库主键，也是 card_* 资源名里的 ID */
+        sqlite3_stmt *stmt = NULL; /* 按 card_id 回查卡名、角色 ID 和服装 ID */
         if (sqlite3_prepare_v2(db,
                 "SELECT id,name,chara_id,open_dress_id FROM card_data WHERE id=?",
                 -1, &stmt, NULL) != SQLITE_OK){
@@ -1402,18 +1461,21 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
             sqlite3_finalize(stmt);
             continue;
         }
-        char cname[128];
+        char cname[128]; /* 卡名用于结果说明及下载目录名 */
         snprintf(cname, sizeof cname, "%s",
                  (const char*)sqlite3_column_text(stmt, 1));
-        int chara_id = sqlite3_column_int(stmt, 2);
-        int dress_id = sqlite3_column_int(stmt, 3);
+        int chara_id = sqlite3_column_int(stmt, 2); /* 头部模型包名所需的角色 ID */
+        int dress_id = sqlite3_column_int(stmt, 3); /* open_dress_id；大于 0 才追加专属 3D 文件 */
         sqlite3_finalize(stmt);
-        printf("\n========== %d|%s ==========\n", card_id, cname);
-
-        static BItem items[MAX_ITEMS];
-        int n = 0;
-        char res[256];
-        const char *sizes[6] = {"circle","sm","s","m","l","xl"};
+        printf("\n========== %d|%s chara_id=%d", card_id, cname,chara_id);
+        if (dress_id > 0)
+            printf(" | dress_id=%d", dress_id);
+        printf("==========\n", dress_id);
+        static BItem items[MAX_ITEMS]; /* 当前卡所有在资源清单中找到的下载候选 */
+        int n = 0; /* 有效资源条目数；add_res 成功加入时递增 */
+        char res[256]; /* 暂存即将查询 manifest 的精确资源名 */
+        const char *sizes[6] = {"circle","sm","s","m","l","xl"}; /* 同一卡面资源的尺寸/用途变体 */
+        /* 卡面、背景、Live2D、3D 写真、语音与 Spine 均按精确资源名查清单；缺失项由 add_res 跳过。 */
         for (int i = 0; i < 6; i++){
             snprintf(res, sizeof res, "card_%d_%s.unity3d", card_id, sizes[i]);
             add_res(rdb, items, &n, res, L"卡面");
@@ -1436,6 +1498,7 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
         add_res(rdb, items, &n, res, L"Spine");
         add_res(rdb, items, &n, "spine_sprachen_petit_chara_common.unity3d", L"Spine");
         if (dress_id > 0 && n < MAX_ITEMS){
+            /* 卡片专属模型组：服装 ID 决定身体/纹理，角色 ID + 服装 ID 决定头部。 */
             snprintf(res, sizeof res, "3d_chara_body_%04d.unity3d", dress_id);
             add_res(rdb, items, &n, res, L"3D模型");
             snprintf(res, sizeof res, "3d_chara_head_%04d_%04d_hq.unity3d",
@@ -1448,7 +1511,7 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
             if (get_hash(rdb, res, items[n].hash, 64) != 0)
                 snprintf(res, sizeof res, "3d_md_body%04d.unity3d", dress_id);
             add_res(rdb, items, &n, res, L"3D模型");
-            const char *tx[3] = {"hq","multi","spec"};
+            const char *tx[3] = {"hq","multi","spec"}; /* 身体材质纹理包的三个资源变体 */
             for (int i = 0; i < 3; i++){
                 snprintf(res, sizeof res, "3d_tx_body%04d_%s.unity3d", dress_id, tx[i]);
                 add_res(rdb, items, &n, res, L"3D模型");
@@ -1456,13 +1519,13 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
         }
 
         if (n == 0){ printf("没有可下载的资源\n"); continue; }
-        static dbdef tmp[MAX_ITEMS + 1];
-        static int picked[MAX_ITEMS];
+        static dbdef tmp[MAX_ITEMS + 1]; /* 第二层资源选择菜单；多一项容纳 END 哨兵 */
+        static int picked[MAX_ITEMS]; /* 勾选行对应到 items[] 的下标 */
         make_menu(tmp, items, n);
-        int rc = pager_picks("卡片资源(空格勾选, Enter下载)", tmp, db, rdb, 1);
+        int rc = pager_picks("卡片资源(空格勾选, Enter下载)", tmp, db, rdb, 1); /* 这里选的是资源文件 */
         if (rc <= 0){ if (rc == -1) printf("已取消\n"); continue; }
 
-        int c = collect(tmp, n, picked);
+        int c = collect(tmp, n, picked); /* 用户确认的资源数；picked 保留其 items[] 下标 */
         char folder[512];
         snprintf(folder, sizeof folder, "%d%s", card_id, cname);
         wchar_t wroot[1024], wfolder[1024], wfoldername[512];
@@ -1470,7 +1533,7 @@ static int browse_card(sqlite3 *db, sqlite3 *rdb){
         utf8_to_wide(folder, wfoldername, 512);
         swprintf(wfolder, 1024, L"%ls\\%ls", wroot, wfoldername);
         mkdirs(wfolder);
-        int downloaded = download_selected(items, picked, c, wfolder);
+        int downloaded = download_selected(items, picked, c, wfolder); /* 真正下载成功的资源数 */
         printf("共下载 %d/%d 个 -> %ls\n", downloaded, c, wfolder);
     }
     return 0;
@@ -1522,8 +1585,8 @@ static int browse_voice(sqlite3 *db, sqlite3 *rdb){
 /* ================== 模块入口 ================== */
 
 int browse_main(void){
-    sqlite3 *db = NULL, *rdb = NULL;
-    const char *mp = find_manifest();
+    sqlite3 *db = NULL, *rdb = NULL; /* db=master.mdb 主数据；rdb=manifest_*.db 资源清单 */
+    const char *mp = find_manifest(); /* 当前本地选中的资源清单数据库路径 */
     if (GetFileAttributesA(DB_PATH) == INVALID_FILE_ATTRIBUTES){
         fprintf(stderr, "缺少 master.mdb，请把它放到程序同目录\n");
         return -1;
@@ -1542,7 +1605,7 @@ int browse_main(void){
         return -1;
     }
 
-    dbdef menu[] = {
+    dbdef menu[] = { /* 一级菜单项的 func 分别指向各类别处理函数 */
         {"1.自由搜索(按资源名)", browse_all, 0},
         {"2.BGM", browse_bgm, 0},
         {"3.歌曲(名/id)", browse_song, 0},
@@ -1559,7 +1622,7 @@ int browse_main(void){
         {"END", NULL, 0}
     };
     while (1){
-        int rc = pager_picks("资源查找与下载", menu, db, rdb, 0);
+        int rc = pager_picks("资源查找与下载", menu, db, rdb, 0); /* 单选：paper.c 直接调用选中项 func(db,rdb) */
         if (rc == -1)
             continue;
         if (rc == 12)
