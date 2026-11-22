@@ -80,24 +80,34 @@ static int run_assetstudio(const FbxItem *it, int idx){
 }
 
 /* 把 outdir\\sub\\*.ext 复制到 dest */
-static int copy_assetstudio_outputs(const FbxItem *it, const wchar_t *outdir){
+int copy_fbx_outputs(const wchar_t *outdir, const wchar_t *dest){
 
     int n = 0;
-    n += copy_dir(outdir, L"Animator", it->dir, L"*.fbx");
+    n += copy_dir(outdir, L"Animator", dest, L"*.fbx");
+    n += copy_dir(outdir, L"Mesh", dest, L"*.obj");
 
     wchar_t sub[1200];
-    swprintf(sub, 1200, L"%ls\\贴图", it->dir);
+    swprintf(sub, 1200, L"%ls\\贴图", dest);
     mkdirs(sub);
     n += copy_dir(outdir, L"Texture2D", sub, L"*.png");
     n += copy_dir(outdir, L"Texture2D", sub, L"*.tga");
 
-    swprintf(sub, 1200, L"%ls\\表情动画", it->dir);
+    swprintf(sub, 1200, L"%ls\\表情动画", dest);
     mkdirs(sub);
     n += copy_dir(outdir, L"AnimationClip", sub, L"*.anim");
 
-    swprintf(sub, 1200, L"%ls\\布料数据", it->dir);
+    swprintf(sub, 1200, L"%ls\\布料数据", dest);
     mkdirs(sub);
     n += copy_dir(outdir, L"MonoBehaviour", sub, L"*.json");
+    return n;
+}
+
+static int copy_assetstudio_outputs(const FbxItem *it, const wchar_t *outdir){
+    int n = copy_fbx_outputs(outdir, it->dir);
+    if (!n){
+        printf("  未生成可复制文件（可能包里没有网格/贴图/动画）\n");
+        return 0;
+    }
 
     /* 写已解包标记 */
     wchar_t wname[256], marker[1300];
@@ -106,7 +116,6 @@ static int copy_assetstudio_outputs(const FbxItem *it, const wchar_t *outdir){
     FILE *mf = _wfopen(marker, L"wb");
     if (mf){ fputs("done", mf); fclose(mf); }
 
-    if (n == 0) printf("  未生成可复制文件（可能包里没有网格/贴图/动画）\n");
     printf("  完成，复制 %d 个文件\n", n);
     return n;
 }
@@ -131,14 +140,14 @@ static DWORD WINAPI fbx_unpack_worker(LPVOID param){
     for (;;){
         LONG task = InterlockedIncrement(&queue->next) - 1;
         if (task < 0 || task >= queue->count) break;
-        queue->processed[task] = run_assetstudio(&queue->items[queue->selected[task]], (int)task);
+        queue->processed[task] = run_assetstudio(&queue->items[queue->selected[task] - 1], (int)task);
     }
     return 0;
 }
 
 static void run_selected_assetstudio(const FbxItem *items, const int *selected, int count,
                                      int *processed){
-    FbxQueue queue = {items, selected, count, -1, processed};
+    FbxQueue queue = {items, selected, count, 0, processed};
     if (count <= 1){
         fbx_unpack_worker(&queue);
         return;

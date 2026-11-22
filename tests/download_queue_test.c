@@ -10,6 +10,18 @@
 typedef struct { int index; int read; } TestRequest;
 static volatile LONG seen[TEST_TASKS];
 static int fail_index = -1, thread_limit = 4, threads_started;
+static volatile LONG spine_probes;
+
+int unpack_downloaded_unity(const wchar_t *path, const wchar_t *dir){
+    (void)dir;
+    const wchar_t *ext = wcsrchr(path, L'.');
+    assert(ext && wcscmp(ext, L".unity3d") == 0);
+    InterlockedIncrement(&spine_probes);
+    return 0;
+}
+
+int unpack_acb_file(const wchar_t *path){ (void)path; return 0; }
+int unpack_usm_file(const wchar_t *path){ (void)path; return 0; }
 
 static HINTERNET test_open(LPCWSTR a, DWORD b, LPCWSTR c, LPCWSTR d, DWORD e){
     (void)a; (void)b; (void)c; (void)d; (void)e; return (HINTERNET)1;
@@ -88,16 +100,18 @@ static void run_case(const wchar_t *root, int count, int limit, int failure){
     DlTask tasks[TEST_TASKS];
     char names[TEST_TASKS][64], hashes[TEST_TASKS][33];
     for(int i=0; i<count; i++){
-        snprintf(names[i],sizeof names[i],"task-%d.bin",i);
+        snprintf(names[i],sizeof names[i], i == 0 ? "task-%d.unity3d" : "task-%d.bin",i);
         snprintf(hashes[i],sizeof hashes[i],"%032x",i);
         tasks[i]=(DlTask){names[i],hashes[i],directory};
     }
+    spine_probes=0;
     int succeeded=dl_many(tasks,(size_t)count);
     assert(succeeded == count - (failure >= 0));
+    assert(spine_probes == (failure != 0));
     for(int i=0; i<count; i++){
         assert(seen[i] == 1);
         wchar_t file[1200];
-        swprintf(file,1200,L"%ls\\task-%d.bin",directory,i);
+        swprintf(file,1200,i == 0 ? L"%ls\\task-%d.unity3d" : L"%ls\\task-%d.bin",directory,i);
         FILE *f=_wfopen(file,L"rb");
         if(i == failure){ assert(!f); continue; }
         assert(f);

@@ -6,6 +6,8 @@
 #include <winhttp.h>
 #include "net.h"
 #include "util.h"
+#include "unpack.h"
+#include "cg.h"
 
 #define CDN_HOST L"asset-starlight-stage.akamaized.net"
 
@@ -173,7 +175,7 @@ cleanup:
 }
 
 /* 下载一个资源并保存到 save_dir，.unity3d 自动 LZ4 解压 */
-int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
+static int download_file(const char *name, const char *hash, const wchar_t *save_dir){
     char url_path[512];
     /* CDN 路径类别(实测确认):
      *   .unity3d -> AssetBundles
@@ -242,11 +244,41 @@ int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
     return 0;
 }
 
+static int is_video(const char *name){
+    const char *ext = strrchr(name, '.');
+    return ext && strcmp(ext, ".usm") == 0;
+}
+
+static void process_download(const char *name, const wchar_t *dir){
+    const char *ext = strrchr(name, '.');
+    if (!ext) return;
+    wchar_t filename[512], path[1300];
+    utf8_to_wide(base_name(name), filename, _countof(filename));
+    if (swprintf(path, _countof(path), L"%ls\\%ls", dir, filename) < 0) return;
+    const wchar_t *leaf = wcsrchr(dir, L'\\');
+    leaf = leaf ? leaf + 1 : dir;
+    int result = 0;
+    if (strcmp(ext, ".unity3d") == 0 && wcscmp(leaf, L"原文件unity3d") != 0)
+        result = unpack_downloaded_unity(path, dir);
+    else if (strcmp(ext, ".acb") == 0)
+        result = unpack_acb_file(path);
+    else if (strcmp(ext, ".usm") == 0)
+        result = unpack_usm_file(path);
+    if (result < 0) printf("  自动解包失败，已保留原文件：%s\n", name);
+}
+
+int dl_one(const char *name, const char *hash, const wchar_t *save_dir){
+    if (download_file(name, hash, save_dir) != 0) return -1;
+    process_download(name, save_dir);
+    return 0;
+}
+
 typedef struct {
     const DlTask *tasks;       /* 共享只读任务数组；任务内字符串由调用者保持到所有 worker 结束 */
     size_t count;              /* tasks 的有效元素数 */
     volatile LONG next;        /* 原子领取任务的计数器；InterlockedIncrement 后减 1 得到下标 */
     volatile LONG successes;   /* 原子累计 dl_one 成功次数，作为 dl_many 返回值 */
+    unsigned char *videos;
 } DlQueue;
 
 static DWORD WINAPI dl_worker(LPVOID param){
@@ -255,8 +287,10 @@ static DWORD WINAPI dl_worker(LPVOID param){
         LONG index = InterlockedIncrement(&queue->next) - 1; /* 原子领取一个唯一任务编号 */
         if (index < 0 || (size_t)index >= queue->count) break;
         const DlTask *task = &queue->tasks[index]; /* 本线程负责的 name/hash/save_dir 三元组 */
-        if (dl_one(task->name, task->hash, task->save_dir) == 0)
-            InterlockedIncrement(&queue->successes);
+        if (download_file(task->name, task->hash, task->save_dir) != 0) continue;
+        InterlockedIncrement(&queue->successes);
+        if (is_video(task->name)) queue->videos[index] = 1;
+        else process_download(task->name, task->save_dir);
     }
     return 0;
 }
@@ -266,7 +300,9 @@ int dl_many(const DlTask *tasks, size_t count){
     if (count > LONG_MAX) return -1;
 
     unsigned worker_count = (unsigned)(count < 4 ? count : 4); /* 小任务集不多建线程，最大四个 worker */
-    DlQueue queue = {tasks, count, 0, 0}; /* next=0，首个原子领取会得到任务下标 0 */
+    unsigned char *videos = calloc(count, sizeof *videos);
+    if (!videos) return -1;
+    DlQueue queue = {tasks, count, 0, 0, videos};
     HANDLE workers[4]; /* 已成功创建的 Windows 线程句柄 */
     unsigned started = 0; /* workers 中实际创建的线程数量 */
     for (; started < worker_count; started++){
@@ -275,12 +311,14 @@ int dl_many(const DlTask *tasks, size_t count){
     }
     if (started == 0){
         dl_worker(&queue);
-        return (int)queue.successes;
     }
     for (unsigned i = 0; i < started; i++){
         WaitForSingleObject(workers[i], INFINITE);
         CloseHandle(workers[i]);
     }
+    for (size_t i = 0; i < count; i++)
+        if (videos[i]) process_download(tasks[i].name, tasks[i].save_dir);
+    free(videos);
     return (int)queue.successes;
 }
 

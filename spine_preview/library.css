@@ -1,0 +1,117 @@
+:root {
+  color-scheme: dark;
+  font: 14px/1.45 "Source Sans 3", "Microsoft YaHei", system-ui, sans-serif;
+  color: #e1e5e2;
+  background: #181b1a;
+  --surface: #232725;
+  --line: #3c4641;
+  --muted: #adb8b1;
+  --accent: #b5e0c7;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { margin: 0; }
+h1, h2, p { margin: 0; }
+h2 { font-size: 16px; }
+
+.workspace {
+  max-width: 1560px;
+  margin-inline: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+.workspace.with-library { grid-template-columns: minmax(230px, 310px) minmax(0, 1fr); }
+.library {
+  padding: 16px;
+  align-self: stretch;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+  min-width: 0;
+}
+
+.library-header, .library-navigation, .library-switcher, .playback, .speed, .gif-size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.library-header, .library-navigation { justify-content: space-between; }
+.library-fields { display: grid; gap: 8px; margin: 12px 0; }
+.library-fields > * { min-width: 0; width: 100%; }
+.library-status, #library_folder { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+.library-list { max-height: 66vh; overflow: auto; padding: 0; margin: 8px 0 0; list-style: none; }
+.library-group { color: var(--muted); font-size: 12px; padding: 8px 8px 4px; }
+.library-list li + li.library-group { margin-top: 5px; border-top: 1px solid var(--line); }
+
+button, select, input[type="search"] {
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: inherit;
+  border-radius: 4px;
+  font: inherit;
+}
+button { cursor: pointer; }
+button:hover:not(:disabled) { background: #314139; }
+button:disabled { opacity: .45; cursor: default; }
+button:focus-visible, select:focus-visible, input:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+button.resource { width: 100%; border-color: transparent; padding: 7px 8px; text-align: left; overflow-wrap: anywhere; }
+button.resource[aria-current="true"] { border-color: #4a715e; background: #314139; color: var(--accent); }
+
+.preview { min-width: 0; padding: 16px 20px 24px; }
+.preview h2 { overflow-wrap: anywhere; }
+.library-switcher { flex-shrink: 0; }
+.library-switcher button, .library-header button { min-width: 34px; min-height: 34px; }
+#library_position { min-width: 53px; text-align: center; color: var(--muted); font-variant-numeric: tabular-nums; }
+.library-navigation { margin-bottom: 14px; }
+.current-resource { min-width: 0; }
+details { padding: 6px 0; }
+summary { cursor: pointer; color: var(--accent); width: fit-content; }
+.row { margin: 8px 0; }
+#manual .row { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+#manual input { max-width: 100%; }
+.skin-hint, #skin_status { margin-top: 8px; color: var(--muted); font-size: 13px; }
+#skin_status { white-space: pre-wrap; overflow-wrap: anywhere; }
+.skin-controls, .skin-controls > label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.skin-controls > label, .skin-controls input { max-width: 100%; }
+.playback { flex-wrap: wrap; }
+.speed input { max-width: 112px; }
+input[type="checkbox"], input[type="range"] { accent-color: #92c7aa; }
+#anim_rows label { display: inline-block; max-width: 100%; overflow-wrap: anywhere; margin-right: 8px; }
+#anim_rows select { max-width: 100%; }
+#msg { color: #e8af76; white-space: pre-wrap; overflow-wrap: anywhere; }
+#fps { color: var(--accent); }
+canvas {
+  display: block;
+  margin-top: 12px;
+  width: min(100%, 76vh);
+  height: auto;
+  background: #333;
+  border: 1px solid var(--line);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 685px) {
+  .workspace.with-library { grid-template-columns: minmax(0, 1fr); }
+  .library, .preview { padding: 12px; }
+  .library { border-right: 0; border-bottom: 1px solid var(--line); }
+  .library-list { max-height: 175px; }
+  .library-fields { grid-template-columns: minmax(0, 1fr) minmax(100px, 35%); }
+}

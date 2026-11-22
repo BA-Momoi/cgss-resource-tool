@@ -99,13 +99,8 @@ static void print_card_res_menu(void){
 static void dl_card_resources(sqlite3 *db, sqlite3 *rdb, int card_id, const char *cname,
                               int chara_id, int dress_id, const int *sel, int nsel){
     /* 角色目录: CGSS_DOWN\{id}{name} */
-    char folder[512];
-    snprintf(folder, sizeof folder, "%d%s", card_id, cname);
-    wchar_t wroot[1024], wfolder[1024], wfoldername[512];
-    get_dl_root(wroot, 1024);
-    utf8_to_wide(folder, wfoldername, 512);
-    swprintf(wfolder, 1024, L"%ls\\%ls", wroot, wfoldername);
-    mkdirs(wfolder);
+    wchar_t wfolder[1024];
+    if (make_named_download_dir(card_id, cname, wfolder, _countof(wfolder)) != 0) return;
 
     ResItem items[64];
     int n = 0;
@@ -334,13 +329,8 @@ static int dl_song(sqlite3 *db, sqlite3 *rdb){
     printf("%d|%s\n", id, sname);
     sqlite3_finalize(stmt);
 
-    char folder[512];
-    snprintf(folder, sizeof folder, "%d%s", id, sname);
-    wchar_t wroot[1024], wfolder[1024], wfoldername[512];
-    get_dl_root(wroot, 1024);
-    utf8_to_wide(folder, wfoldername, 512);
-    swprintf(wfolder, 1024, L"%ls\\%ls", wroot, wfoldername);
-    mkdirs(wfolder);
+    wchar_t wfolder[1024];
+    if (make_named_download_dir(id, sname, wfolder, _countof(wfolder)) != 0) return -1;
 
     printf("可选资源（空格/逗号分隔数字，a=全部，0=开始下载）：\n");
     printf("1.音频(acb)\t2.封面(jacket)\t3.动作\n");

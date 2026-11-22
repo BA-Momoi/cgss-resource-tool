@@ -10,6 +10,7 @@
 #include "auto_updata.h"
 #include "CLI.h"
 #include "check_update.h"
+#include "util.h"
 #include <wchar.h>
 #define BUILD_VERIANT "db"
 
@@ -121,6 +122,52 @@ static int acquire_instance_lock(void){
     return 1;
 }
 
+static HANDLE app_version_thread, resource_version_thread;
+static double latest_app_version;
+static long long latest_resource_version;
+static int resource_sync_attempted, exit_for_update;
+
+static DWORD WINAPI fetch_app_version(LPVOID arg){
+    (void)arg;
+    latest_app_version = updata_latest_version();
+    return 0;
+}
+
+static DWORD WINAPI fetch_resource_version(LPVOID arg){
+    (void)arg;
+    latest_resource_version = check_update_latest_version(1);
+    return 0;
+}
+
+static int browse_with_current_data(void){
+    if (!resource_sync_attempted){
+        const int have_local = find_manifest() && GetFileAttributesW(L"master.mdb") != INVALID_FILE_ATTRIBUTES;
+        DWORD ready = resource_version_thread ?
+            WaitForSingleObject(resource_version_thread, have_local ? 0 : INFINITE) : WAIT_OBJECT_0;
+        if (ready == WAIT_OBJECT_0){
+            resource_sync_attempted = 1;
+            int result = check_update_run_with_version(NULL, latest_resource_version);
+            if (result != 0) printf("数据库同步未完成，将继续使用本地数据库。\n");
+        }
+    }
+    return browse_main();
+}
+
+static int apply_app_update(void){
+    printf("正在检查程序更新...\n");
+    fflush(stdout);
+    if (app_version_thread){
+        WaitForSingleObject(app_version_thread, INFINITE);
+        CloseHandle(app_version_thread);
+        app_version_thread = NULL;
+    }
+    if (latest_app_version <= 0) latest_app_version = updata_latest_version();
+    int result = updata_apply_version(CGSS_VERSION, latest_app_version);
+    if (result == 2) exit_for_update = 1;
+    else system("pause");
+    return result;
+}
+
 int main(int argc, char *argv[]){
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);   // 强制 UTF-8 控制台，输入输出统一
@@ -128,6 +175,8 @@ int main(int argc, char *argv[]){
     if (!acquire_instance_lock()) return 2;
     prefer_bundled_dotnet();
     if (argc >= 2){
+        if (strcmp(argv[1], "--preview") == 0 || strcmp(argv[1], "-p") == 0)
+            use_application_directory();
         if (strcmp(argv[1], "--browse") == 0 || strcmp(argv[1], "-b") == 0 ||
             strcmp(argv[1], "--download") == 0 || strcmp(argv[1], "-d") == 0){
             use_application_directory();
@@ -138,32 +187,22 @@ int main(int argc, char *argv[]){
     }
 
     use_application_directory();
-    int rc = updata_main(CGSS_VERSION);
-    if(rc == -1){
-        
-        printf("更新失败，请关闭程序重试\n");
-        fflush(stdout);
-        system("pause");
-    }
-    if(rc == 2){
-    /* 更新脚本已经在后台/新窗口跑起来了,主程序必须立刻退出 */
-    printf("正在更新,程序即将关闭...\n");
-    fflush(stdout);
-    return 0;
-    }
-    if (check_update_run(NULL) != 0)
-        printf("数据库同步未完成，将继续使用本地数据库。\n");
+    app_version_thread = CreateThread(NULL, 0, fetch_app_version, NULL, 0, NULL);
+    resource_version_thread = CreateThread(NULL, 0, fetch_resource_version, NULL, 0, NULL);
     /* 查找和下载已整合成一个模块(browse.c), 主菜单只留一个入口 */
     def menu[] = {
-        {"1.资源查找与下载", browse_main, 0},
-        {"2.解包", unpack_main, 0},
-        {"3.打开Spine预览(beta)", open_spine_preview, 0},
-        {"4.USM/CG解包", unpack_usm, 0},
+        {"1.资源查找与下载", browse_with_current_data, 0},
+        {"2.打开 Spine 资源库", open_spine_preview, 0},
+        {"3.USM/CG 手动解包", unpack_usm, 0},
+        {"4.检查程序更新", apply_app_update, 0},
         {"5.退出", NULL, 0},
         {"END", NULL, 0}            /* 哨兵必须最后一行 */
     };
 
-    while(1){
+    while(!exit_for_update){
+        if (app_version_thread && WaitForSingleObject(app_version_thread, 0) == WAIT_OBJECT_0 &&
+            latest_app_version > CGSS_VERSION)
+            snprintf(menu[3].name, sizeof menu[3].name, "4.检查程序更新（有新版）");
         int rc = pager_pick("主菜单", menu, 0);
         if(rc == -1)                /* Esc: 继续显示菜单 */
             continue;
@@ -172,6 +211,12 @@ int main(int argc, char *argv[]){
         /* 选中项的 func 已经在 pager 里调用过了, 这里直接循环 */
     }
 
+    if (app_version_thread) CloseHandle(app_version_thread);
+    if (resource_version_thread) CloseHandle(resource_version_thread);
+    if (exit_for_update){
+        printf("正在更新，程序即将关闭...\n");
+        return 0;
+    }
     fflush(stdout);    // 先把结果全部输出，再等按键，避免重定向时和 pause 混在一起
     system("pause");   // 双击 exe 时窗口不闪退，按任意键退出
     return 0;

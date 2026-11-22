@@ -15,6 +15,7 @@ static void print_usage(const char *program) {
     printf("  --help, -h                 显示帮助\n");
     printf("  --version, -v              显示版本\n");
     printf("  --unpack, -u <目录>        解包目录下角色资源中的所有未处理文件\n");
+    printf("  --process-downloads <目录>  补处理已下载的 Unity、ACB 和 USM 文件\n");
     printf("  --browse, -b               打开资源查找与下载菜单\n");
     printf("  --download, -d             打开资源下载菜单\n");
     printf("  --preview, -p              打开 Spine 预览\n");
@@ -54,7 +55,8 @@ int cli_main(int argc, char **argv) {
         printf("%.2f\n", CGSS_VERSION);
         return 0;
     }
-    if (strcmp(option, "--unpack") == 0 || strcmp(option, "-u") == 0) {
+    const int process_all = strcmp(option, "--process-downloads") == 0;
+    if (process_all || strcmp(option, "--unpack") == 0 || strcmp(option, "-u") == 0) {
         if (argc != 3) {
             fprintf(stderr, "用法: %s %s <资源目录>\n", argv[0], option);
             return 2;
@@ -74,7 +76,7 @@ int cli_main(int argc, char **argv) {
             fprintf(stderr, "无法解析资源目录路径\n");
             return 2;
         }
-        int rc = unpack_resources_path(path, 0);
+        int rc = process_all ? process_download_directory(path) : unpack_resources_path(path, 0);
         free(path);
         return rc == 0 ? 0 : 1;
     }
@@ -82,7 +84,7 @@ int cli_main(int argc, char **argv) {
         strcmp(option, "--download") == 0 || strcmp(option, "-d") == 0)
         return run_noarg_command(argc, option, browse_main);
     if (strcmp(option, "--preview") == 0 || strcmp(option, "-p") == 0)
-        return run_noarg_command(argc, option, open_spine_preview);
+        return run_noarg_command(argc, option, run_spine_preview_cli);
     if (strcmp(option, "--unpack-usm") == 0 || strcmp(option, "-uu") == 0 ||
         strcmp(option, "--cg") == 0 || strcmp(option, "-c") == 0)
         return run_noarg_command(argc, option, unpack_usm);

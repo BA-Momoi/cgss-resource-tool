@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <ctype.h>
+#include <limits.h>
 #include <direct.h>
 #include <windows.h>
 #include "paper.h"
@@ -76,9 +77,9 @@ static void InitMask(unsigned int key1, unsigned int key2){
 }
 
 static void MaskVideo(unsigned char *data, int size){
+    if (size < 0x240) return;
     data += 0x40;
     size -= 0x40;
-    if (size < 0x200) return;
     unsigned char mask[0x20];
     memcpy(mask, videoMask2, 0x20);
     for (int i = 0x100; i < size; i++){
@@ -93,6 +94,7 @@ static void MaskVideo(unsigned char *data, int size){
 }
 
 static void MaskAudio(unsigned char *data, int size){
+    if (size <= 0x140) return;
     data += 0x140;
     size -= 0x140;
     for (int i = 0; i < size; i++)
@@ -103,52 +105,57 @@ static void MaskAudio(unsigned char *data, int size){
 static int demux_file(const wchar_t *usm_path, const wchar_t *outdir){
     FILE *fp = _wfopen(usm_path, L"rb");
     if (!fp){ printf("打不开 %ls\n", usm_path); return -1; }
-    fseek(fp, 0, SEEK_END);
-    long fileSize = ftell(fp);
+    long long file_size = _fseeki64(fp, 0, SEEK_END) == 0 ? _ftelli64(fp) : -1;
 
     wchar_t vpath[1300], apath[1300];
-    swprintf(vpath, 1300, L"%ls\\video.m2v", outdir);
-    swprintf(apath, 1300, L"%ls\\audio.adx", outdir);
+    if (file_size < 0 || swprintf(vpath, 1300, L"%ls\\video.m2v", outdir) < 0 ||
+        swprintf(apath, 1300, L"%ls\\audio.adx", outdir) < 0){
+        fclose(fp);
+        return -1;
+    }
     FILE *vo = NULL, *ao = NULL;
     InitMask(0xF27E3B22, 0x00003657);
 
-    long pos = 0;
+    long long pos = 0;
     unsigned nvideo = 0, naudio = 0;
-    while (pos < fileSize){
+    while (pos < file_size){
         unsigned char h[32];
-        fseek(fp, pos, SEEK_SET);
-        if (fread(h, 1, 32, fp) != 32) break;
+        if (_fseeki64(fp, pos, SEEK_SET) != 0 || fread(h, 1, sizeof h, fp) != sizeof h) break;
 
         unsigned ds  = be32(h + 4);
         unsigned dof = h[9];
         unsigned pad = be16(h + 10);
         unsigned typ = h[15] & 3;
+        long long chunk_size = 8LL + ds;
+        if (chunk_size < (long long)sizeof h || chunk_size > file_size - pos || ds < dof + pad) break;
         unsigned dlen = ds - dof - pad;
-        unsigned dpos = pos + 8 + dof;
-
-        unsigned char *data = (unsigned char*)malloc(dlen ? dlen : 1);
-        fseek(fp, dpos, SEEK_SET);
-        fread(data, 1, dlen, fp);
-
-        if (memcmp(h, "@SFV", 4) == 0 && typ == 0){
-            MaskVideo(data, dlen);
-            if (!vo) vo = _wfopen(vpath, L"wb");
-            fwrite(data, 1, dlen, vo);
-            nvideo++;
-        } else if (memcmp(h, "@SFA", 4) == 0 && typ == 0){
-            MaskAudio(data, dlen);
-            if (!ao) ao = _wfopen(apath, L"wb");
-            fwrite(data, 1, dlen, ao);
-            naudio++;
+        int video = memcmp(h, "@SFV", 4) == 0;
+        int audio = memcmp(h, "@SFA", 4) == 0;
+        if (typ == 0 && dlen && (video || audio)){
+            if (dlen > INT_MAX || _fseeki64(fp, pos + 8 + dof, SEEK_SET) != 0) break;
+            unsigned char *data = malloc(dlen);
+            if (!data) break;
+            int ok = fread(data, 1, dlen, fp) == dlen;
+            if (ok){
+                FILE **output = video ? &vo : &ao;
+                if (video) MaskVideo(data, (int)dlen);
+                else MaskAudio(data, (int)dlen);
+                if (!*output) *output = _wfopen(video ? vpath : apath, L"wb");
+                ok = *output && fwrite(data, 1, dlen, *output) == dlen;
+            }
+            free(data);
+            if (!ok) break;
+            if (video) nvideo++;
+            else naudio++;
         }
-        free(data);
-        pos += 8 + ds;
+        pos += chunk_size;
     }
     fclose(fp);
-    if (vo) fclose(vo);
-    if (ao) fclose(ao);
+    int video_ok = !vo || fclose(vo) == 0;
+    int audio_ok = !ao || fclose(ao) == 0;
+    if (pos != file_size || !nvideo || !video_ok || !audio_ok) return -1;
     printf("解出: 视频块 %u, 音频块 %u\n", nvideo, naudio);
-    return (nvideo > 0) ? 0 : -1;
+    return 0;
 }
 
 /* ================== 转 mp4 / 解 acb ================== */
@@ -213,8 +220,11 @@ static int convert_mp4(const wchar_t *outdir, const wchar_t *mp4name,
         return -1;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    if (exit_code != 0) return -1;
     printf("完成 -> %ls\\%ls\n", outdir, mp4name);
     return 0;
 }
@@ -231,7 +241,7 @@ static void find_acb2wavs(wchar_t *out, int n){
         wcscpy(out, cand);
 }
 
-static int decode_acb(const wchar_t *acb_path){
+int unpack_acb_file(const wchar_t *acb_path){
     wchar_t tool[1300];
     find_acb2wavs(tool, 1300);
     if (!tool[0]){
@@ -250,8 +260,11 @@ static int decode_acb(const wchar_t *acb_path){
         return -1;
     }
     WaitForSingleObject(pi.hProcess, INFINITE);
+    DWORD exit_code = 1;
+    GetExitCodeProcess(pi.hProcess, &exit_code);
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    if (exit_code != 0) return -1;
     printf("解码完成(输出在 acb 同目录)\n");
     return 0;
 }
@@ -281,6 +294,19 @@ static void get_movie_id(const wchar_t *name, wchar_t *out, int n){
     out[k] = 0;
 }
 
+/* 2drichNNNN.usm 和 movieNNNN.usm 使用 song_NNNN.acb。 */
+static void get_song_token(const wchar_t *name, wchar_t *out, int n){
+    out[0] = 0;
+    const wchar_t *id;
+    if (wcsncmp(name, L"2drich", 6) == 0) id = name + 6;
+    else if (wcsncmp(name, L"movie", 5) == 0) id = name + 5;
+    else return;
+    int length = 0;
+    while (iswdigit(id[length])) length++;
+    if (length > 0 && length < n - 5)
+        swprintf(out, n, L"song_%.*ls", length, id);
+}
+
 /* 找 acb2wavs 解出来的 wav: <acb目录>\_acb_<名>.acb\internal\*.wav */
 static int find_wav_from_acb(const wchar_t *acb_path, wchar_t *wav_out, int n){
     wav_out[0] = 0;
@@ -303,7 +329,7 @@ static int find_wav_from_acb(const wchar_t *acb_path, wchar_t *wav_out, int n){
 }
 
 /* 解一个 usm: 解出 mp4 + 配对 acb 的 wav */
-static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
+static int unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
     wchar_t base[512];
     wcscpy(base, wbase(usm_path));
     wstrip_ext(base);
@@ -320,7 +346,7 @@ static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
     printf("\n==== 解包 %ls ====\n", usm_path);
     if (demux_file(usm_path, dir) != 0){
         printf("解包失败\n");
-        return;
+        return -1;
     }
 
     wchar_t mp4name[512];
@@ -332,18 +358,8 @@ static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
      * 名字含 movie id 或含文件名的 .acb */
     wchar_t movie[64];
     get_movie_id(usm_path, movie, 64);
-    /* 2drich<歌id>.usm 的配对是 song_<歌id>.acb */
-    wchar_t songtok[64] = L"";
-    if (wcsncmp(base, L"2drich", 6) == 0){
-        const wchar_t *d = base + 6;
-        int k = 0;
-        swprintf(songtok, 64, L"song_");
-        while (d[k] && iswdigit(d[k]) && k < 56){
-            songtok[5 + k] = d[k];
-            k++;
-        }
-        songtok[5 + k] = 0;
-    }
+    wchar_t songtok[64];
+    get_song_token(base, songtok, _countof(songtok));
     wchar_t parent[1200], audiodir[1300], first_acb[1300] = L"";
     swprintf(parent, 1200, L"%ls\\..", usmdir);
     swprintf(audiodir, 1300, L"%ls\\..\\音频", usmdir);
@@ -367,7 +383,8 @@ static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
                 wchar_t acb[1300];
                 swprintf(acb, 1300, L"%ls\\%ls", cands[c], fd.cFileName);
                 if (!first_acb[0]) wcscpy(first_acb, acb);
-                decode_acb(acb);
+                wchar_t wav[1300];
+                if (find_wav_from_acb(acb, wav, 1300) != 0) unpack_acb_file(acb);
                 found++;
             }
         } while (FindNextFileW(h, &fd));
@@ -382,7 +399,11 @@ static void unpack_one(const wchar_t *usm_path, const wchar_t *custom_name){
         find_wav_from_acb(first_acb, audio_wav, 1300);
     if (audio_wav[0])
         printf("找到音频: %ls, 准备合成进视频\n", audio_wav);
-    convert_mp4(dir, mp4name, audio_wav);
+    return convert_mp4(dir, mp4name, audio_wav);
+}
+
+int unpack_usm_file(const wchar_t *path){
+    return unpack_one(path, NULL);
 }
 
 /* 递归解一个目录里的所有 usm */

@@ -187,7 +187,7 @@ static void net_init(void){
 
 /* 小文件：全部读进内存。unity_ua=1 时带 Unity 伪装头 */
 static int http_get_mem(const wchar_t *host, const wchar_t *path,
-                        unsigned char **out, DWORD *out_len, int unity_ua){
+                        unsigned char **out, DWORD *out_len, int unity_ua, int quiet){
     *out = NULL;
     *out_len = 0;
     net_init();
@@ -197,6 +197,7 @@ static int http_get_mem(const wchar_t *host, const wchar_t *path,
     HINTERNET req = WinHttpOpenRequest(conn, L"GET", path, NULL, WINHTTP_NO_REFERER,
                                        WINHTTP_DEFAULT_ACCEPT_TYPES, WINHTTP_FLAG_SECURE);
     if (!req){ WinHttpCloseHandle(conn); return -1; }
+    WinHttpSetTimeouts(req, 5000, 5000, 5000, 5000);
     if (unity_ua)
         WinHttpAddRequestHeaders(req, CDN_UA, (DWORD)-1,
                                  WINHTTP_ADDREQ_FLAG_REPLACE | WINHTTP_ADDREQ_FLAG_ADD);
@@ -240,10 +241,10 @@ static int http_get_mem(const wchar_t *host, const wchar_t *path,
             }
             if (complete && buf){ *out = buf; *out_len = len; rc = 0; }
             else free(buf);
-        } else {
+        } else if (!quiet){
             printf("HTTP %lu\n", (unsigned long)status);
         }
-    } else {
+    } else if (!quiet){
         printf("网络错误 err=%lu\n", (unsigned long)GetLastError());
     }
     WinHttpCloseHandle(req);
@@ -761,7 +762,23 @@ static int ensure_master(const wchar_t *dir, const wchar_t *manifest_path){
     return 0;
 }
 
-int check_update_run(const wchar_t *requested_dir){
+long long check_update_latest_version(int quiet){
+    unsigned char *info = NULL;
+    DWORD info_len = 0;
+    if (http_get_mem(KIRARA_HOST, L"/api/v1/info", &info, &info_len, 0, quiet) != 0){
+        if (!quiet) printf("查询最新版本失败（starlight.kirara.ca 无法访问）\n");
+        return -1;
+    }
+    long long latest = parse_truth_version(info, info_len);
+    free(info);
+    if (latest <= 0){
+        if (!quiet) printf("解析最新版本失败\n");
+        return -1;
+    }
+    return latest;
+}
+
+int check_update_run_with_version(const wchar_t *requested_dir, long long latest){
     SetConsoleCP(CP_UTF8);
     SetConsoleOutputCP(CP_UTF8);
 
@@ -788,19 +805,11 @@ int check_update_run(const wchar_t *requested_dir){
     else
         printf("本地清单: 未找到 manifest_*.db（将全新下载）\n");
 
-    printf("正在查询最新资源版本 ...\n");
-    unsigned char *info = NULL;
-    DWORD info_len = 0;
-    if (http_get_mem(KIRARA_HOST, L"/api/v1/info", &info, &info_len, 0) != 0){
-        printf("查询最新版本失败（starlight.kirara.ca 无法访问）\n");
-        return 1;
+    if (latest == 0){
+        printf("正在查询最新资源版本 ...\n");
+        latest = check_update_latest_version(0);
     }
-    long long latest = parse_truth_version(info, info_len);
-    free(info);
-    if (latest <= 0){
-        printf("解析最新版本失败\n");
-        return 1;
-    }
+    if (latest <= 0) return 1;
     printf("最新清单: manifest_%lld.db\n", latest);
 
     wchar_t active_manifest[1200] = L"";
@@ -818,7 +827,7 @@ int check_update_run(const wchar_t *requested_dir){
         printf("获取清单索引 ...\n");
         unsigned char *idx = NULL;
         DWORD idx_len = 0;
-        if (http_get_mem(CDN_HOST, path, &idx, &idx_len, 1) != 0){
+        if (http_get_mem(CDN_HOST, path, &idx, &idx_len, 1, 0) != 0){
             printf("获取 all_dbmanifest 失败，版本 %lld 可能已不可用\n", latest);
             return 1;
         }
@@ -850,11 +859,6 @@ int check_update_run(const wchar_t *requested_dir){
             return 1;
         }
         wcscpy(active_manifest, db_file);
-    }
-
-    if (!validate_manifest_db(active_manifest)){
-        printf("本地资源清单校验失败\n");
-        return 1;
     }
 
     wchar_t master_file[1200], master_backup[1240];
@@ -903,6 +907,10 @@ int check_update_run(const wchar_t *requested_dir){
 
     printf("完成：清单库与主库均已就绪（程序会自动使用 %ls）。\n", active_manifest);
     return 0;
+}
+
+int check_update_run(const wchar_t *requested_dir){
+    return check_update_run_with_version(requested_dir, 0);
 }
 
 #ifndef CGSS_EMBED_CHECK_UPDATE

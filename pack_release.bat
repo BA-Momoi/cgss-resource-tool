@@ -43,7 +43,9 @@ if not defined HAVE_DLL goto missing_audio_dlls
 set "ASSETSTUDIO_SOURCE="
 if exist "AssetStudio\AssetStudio.CLI.exe" set "ASSETSTUDIO_SOURCE=AssetStudio"
 if not defined ASSETSTUDIO_SOURCE if exist "build\AssetStudio\AssetStudio.CLI.exe" set "ASSETSTUDIO_SOURCE=build\AssetStudio"
+if not defined ASSETSTUDIO_SOURCE if exist "release\CGSS_ResourceTool\AssetStudio\AssetStudio.CLI.exe" set "ASSETSTUDIO_SOURCE=release\CGSS_ResourceTool\AssetStudio"
 if not defined ASSETSTUDIO_SOURCE goto missing_assetstudio
+echo Using AssetStudio from "%ASSETSTUDIO_SOURCE%".
 
 set "STAGE="
 :new_stage
@@ -58,7 +60,7 @@ copy /y "build_static\CGSS_Script.exe" "%PACKAGE%\CGSS_Script.exe" >nul
 if errorlevel 1 goto err
 copy /y "build_static\usm.exe" "%PACKAGE%\usm.exe" >nul
 if errorlevel 1 goto err
-xcopy /E /Y /I "build_static\spine_preview" "%PACKAGE%\spine_preview" >nul
+xcopy /E /Y /I "spine_preview" "%PACKAGE%\spine_preview" >nul
 if errorlevel 1 goto err
 copy /y "cgss_apply_textures.py" "%PACKAGE%\" >nul
 if errorlevel 1 goto err
@@ -142,6 +144,8 @@ echo ERROR: manifest_*.db is required for downloads.
 goto err
 :missing_assetstudio
 echo ERROR: AssetStudio.CLI.exe is required for model and Spine extraction.
+echo Put the complete AssetStudio CLI folder at "%CD%\AssetStudio".
+echo Also checked "build\AssetStudio" and "release\CGSS_ResourceTool\AssetStudio".
 goto err
 :missing_ffmpeg
 echo ERROR: ffmpeg.exe is required for video conversion.

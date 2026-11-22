@@ -69,6 +69,7 @@ int pager_pick(const char *title, def *Def,int multi){
             }
         }
 
+        fflush(stdout);
         int k = _getch();
         if(k == 0xE0 || k == 0){
             k = _getch();

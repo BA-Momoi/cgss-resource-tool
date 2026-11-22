@@ -16,14 +16,14 @@ add_executable(CGSS_Script
     stage_map.c
     browse.c
     cg.c
-    spine_convert.c preview.c texture_merge.cpp
+    spine_convert.c preview.c spine_catalog.c texture_merge.cpp
     GBKswapUTF8.c sqlite3.c
     sticker.c
     auto_updata.c 
     miniz/miniz.h
     miniz/miniz.c)
 
-target_link_libraries(CGSS_Script winhttp gdiplus pathcch)
+target_link_libraries(CGSS_Script winhttp gdiplus pathcch ws2_32)
 target_compile_definitions(CGSS_Script PRIVATE CGSS_EMBED_CHECK_UPDATE)
 
 target_compile_options(CGSS_Script PRIVATE -fexec-charset=UTF-8)

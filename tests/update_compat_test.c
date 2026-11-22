@@ -52,7 +52,13 @@ static BOOL test_available(HINTERNET h, LPDWORD available){
 }
 static BOOL test_read(HINTERNET h, LPVOID buffer, DWORD wanted, LPDWORD got){
     if(live_probe) return WinHttpReadData(h,buffer,wanted,got);
-    if(h == fake_feed){ memcpy(buffer,feed+feed_pos,wanted); feed_pos += wanted; *got=wanted; return TRUE; }
+    if(h == fake_feed){
+        size_t remaining = strlen(feed) - feed_pos;
+        *got = remaining < wanted ? (DWORD)remaining : wanted;
+        memcpy(buffer, feed + feed_pos, *got);
+        feed_pos += *got;
+        return TRUE;
+    }
     *got = (DWORD)fread(buffer,1,wanted,package);
     return !ferror(package);
 }

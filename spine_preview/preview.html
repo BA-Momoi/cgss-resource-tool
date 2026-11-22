@@ -4,40 +4,74 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>CGSS Spine动画预览</title>
-<style>
-  body { font-family: "Microsoft YaHei", sans-serif; background:#222; color:#eee; padding:16px; }
-  h1 { font-size:18px; }
-  .row { margin:8px 0; }
-  label { display:inline-block; width:130px; }
-  canvas { background:#333; border:1px solid #555; display:block; margin-top:12px; max-width:100%; }
-  select, button { padding:4px 8px; }
-  #anim_rows label { width:auto; max-width:100%; overflow-wrap:anywhere; margin-right:8px; }
-  #msg { color:#f80; white-space:pre-wrap; }
-  #fps { color:#8f8; }
-</style>
+<link rel="stylesheet" href="library.css">
 </head>
 <body>
-<h1>CGSS Spine动画预览</h1>
-<p>用法：<br>
-<b>卡面Spina动画</b>（角色目录\卡面Spina动画\spine 下）：骨架把 5 个都选上（SP3S{卡id}_bg / _chara / _eff1 / _eff2 / _fg 的 .skel 或 .skel.asset，页面自动转 JSON），图集选 SP3S{卡id}_tex.atlas(.asset)，贴图选 tex.png + tex_A8.png（A8 是透明通道，自动合成去黑边）。<br>
-<b>Spine小人</b>（角色目录\spine 下）：骨架选 SPSprachen_s.json / SPSprachen_N.json（<b>老卡用 N、新卡用 s</b>，拿不准两个都试，头身比例正常的是对的），图集选 SPC{卡id}.atlas(.asset)，贴图选 SPC{卡id}.png（自带 alpha，不需要 A8）。人物左右反了就用下面的「左右镜像(flip)」勾选框切换。<br>
-图层顺序自动排好：bg→eff2→chara→eff1→fg。</p>
+<main class="workspace" id="workspace">
+<aside id="library" class="library" hidden aria-labelledby="library_title">
+  <div class="library-header">
+    <h2 id="library_title">资源库</h2>
+    <button id="library_refresh" type="button" title="重新扫描下载目录" aria-label="重新扫描下载目录">↻</button>
+  </div>
+  <div class="library-fields">
+    <label class="sr-only" for="library_search">搜索资源</label>
+    <input type="search" id="library_search" placeholder="搜索名称、目录、动作包" autocomplete="off">
+    <label class="sr-only" for="library_category">资源分类</label>
+    <select id="library_category"><option value="">全部分类</option></select>
+  </div>
+  <p class="library-status" id="library_status" role="status"></p>
+  <ul id="library_list" class="library-list" aria-label="Spine 资源"></ul>
+</aside>
+<section class="preview" aria-label="动画预览">
+<div id="library_navigation" class="library-navigation" hidden>
+  <div class="current-resource">
+    <h2 id="library_current">动画预览</h2>
+    <div id="library_folder"></div>
+  </div>
+  <div class="library-switcher">
+    <button id="library_previous" type="button" title="上一个资源" aria-label="上一个资源">←</button>
+    <span id="library_position" aria-live="polite"></span>
+    <button id="library_next" type="button" title="下一个资源" aria-label="下一个资源">→</button>
+  </div>
+</div>
+<details id="skin_swap" hidden>
+<summary>更换角色</summary>
+<p class="skin-hint">更换同一角色的图集和全部 PNG 贴图即可套用当前动作。有 N / S 两套骨架时，网页会分别检查兼容性。</p>
+<div class="row skin-controls">
+  <label>图集 <input id="skin_atlas" type="file" accept=".atlas,.asset"></label>
+  <label>贴图 <input id="skin_png" type="file" accept=".png" multiple></label>
+  <button type="button" id="skin_apply">应用角色</button>
+  <label id="rig_choice" hidden>骨架 <select id="rig_variant"></select></label>
+</div>
+<p id="skin_status" role="status"></p>
+</details>
+<details id="manual">
+<summary>手动导入</summary>
 <div class="row"><label>骨架 .skel/.asset/.json：</label><input type="file" id="f_skel" accept=".skel,.skel.asset,.json,.asset" multiple></div>
 <div class="row"><label>图集 .atlas：</label><input type="file" id="f_atlas" accept=".atlas,.atlas.asset,.asset"></div>
 <div class="row"><label>贴图 .png：</label><input type="file" id="f_png" accept=".png" multiple></div>
-<div class="row" id="anim_rows"></div>
-<div class="row">
+</details>
+<div class="row playback">
   <button id="btn_play">播放</button>
   <button id="btn_pause">暂停</button>
-  <label>速度</label><input type="range" id="speed" min="0.1" max="3" step="0.1" value="1">
-  <label>显示全部层</label><input type="checkbox" id="chk_all" checked>
-  <label>左右镜像(flip)</label><input type="checkbox" id="chk_flip" checked>
+  <label class="speed">速度 <input type="range" id="speed" min="0.1" max="3" step="0.1" value="1"></label>
+  <label><input type="checkbox" id="chk_all" checked> 显示全部层</label>
+  <label><input type="checkbox" id="chk_flip" checked> 左右镜像</label>
   <button id="btn_export" title="按背景(bg)范围导出 MP4（最高码率）">导出MP4(beta)</button>
-  <span id="export_status"></span>
+  <label class="gif-size">GIF 高度 <select id="gif_height">
+    <option value="240">240 px</option>
+    <option value="480" selected>480 px</option>
+    <option value="720">720 px</option>
+  </select></label>
+  <button type="button" id="btn_export_gif" title="按整段动作的角色范围导出透明 GIF">导出 GIF</button>
+  <span id="export_status" role="status"></span>
   <span id="fps"></span>
 </div>
-<div id="msg"></div>
+<div class="row" id="anim_rows"></div>
+<div id="msg" role="status"></div>
 <canvas id="cv"></canvas>
+</section>
+</main>
 
 <script src="spine-core.js"></script>
 <script src="spine-canvas.js"></script>
@@ -55,11 +89,41 @@ var SS = 2;              // 超采样倍数：整帧画到 2 倍离屏画布再�
 try { var _m = /[?&]ss=(\d+)/.exec(location.search); if (_m) SS = parseInt(_m[1], 10) || 2; } catch(e){}
 var offCanvas = null, offRenderer = null;
 var glCanvas = null, glRenderer = null;
-var expGL = null, expGLCanvas = null;
 var frameId = null, previewReady = false;
 var loadVersion = { skel: 0, atlas: 0, png: 0 };
 var loading = { skel: false, atlas: false, png: false };
 var loadErrors = { skel: '', atlas: '', png: '' };
+var catalogLoad = null;
+var rigVariants = [];
+var rigIndex = 0;
+var skinVersion = 0;
+
+function canSwapSkin(name){
+  return /^(car_commuChara|SPKCStaff|SPACSkelton|SPSprachen)/i.test(name);
+}
+
+function manualRigFamily(name){
+  var match = /^(car_commuChara)(Normal|Small)[._]|^(SPACSkelton|SPSprachen_)(N|S)[._]/i.exec(name);
+  if (!match) return null;
+  var variant = (match[2] || match[4]).toLowerCase();
+  return { family: (match[1] || match[3]).toLowerCase(), label: /^(n|normal)$/.test(variant) ? 'N' : 'S' };
+}
+
+function setRigVariants(variants, index){
+  ++skinVersion;
+  rigVariants = variants;
+  rigIndex = index;
+  document.getElementById('skin_swap').hidden = !variants.length &&
+    !(skelList.length === 1 && canSwapSkin(skelList[0].name));
+  document.getElementById('rig_choice').hidden = variants.length < 2;
+  var selector = document.getElementById('rig_variant');
+  selector.replaceChildren(...variants.map(function(variant){ return new Option(variant.label); }));
+  selector.selectedIndex = index;
+  document.getElementById('skin_status').textContent = '';
+  document.getElementById('skin_apply').disabled = false;
+  document.getElementById('skin_atlas').value = '';
+  document.getElementById('skin_png').value = '';
+}
 
 function msg(s){ document.getElementById('msg').textContent = s; }
 function fileStatus(s){
@@ -73,13 +137,14 @@ function resetPreview(){
   renderer = null;
   if (glRenderer && glRenderer.dispose) glRenderer.dispose();
   glRenderer = null; glCanvas = null;
+  offRenderer = null; offCanvas = null;
   document.getElementById('anim_rows').innerHTML = '';
   document.getElementById('fps').textContent = '';
   var canvas = document.getElementById('cv'), ctx = canvas.getContext('2d');
   ctx.setTransform(1,0,0,1,0,0);
   ctx.clearRect(0,0,canvas.width,canvas.height);
 }
-function skeletonText(ab, name){
+function skeletonText(ab, name, allowMissingEvents){
   var bytes = new Uint8Array(ab), obj;
   if (!bytes.length) throw new Error('骨架文件为空：' + name);
   if (bytes[0] === 0x1c) {
@@ -93,6 +158,14 @@ function skeletonText(ab, name){
   }
   if (!obj || !Array.isArray(obj.bones) || !obj.bones.length)
     throw new Error('文件 "' + name + '" 缺少骨架数据。');
+  // Preview rendering does not consume game-side events. Keep the visual timelines usable.
+  if (allowMissingEvents) Object.values(obj.animations || {}).forEach(function(animation){
+    if (!Array.isArray(animation.events)) return;
+    animation.events = animation.events.filter(function(event){
+      return event && event.name && Object.prototype.hasOwnProperty.call(obj.events || {}, event.name);
+    });
+    if (!animation.events.length) delete animation.events;
+  });
   return JSON.stringify(obj);
 }
 function validatedAtlasText(ab, name){
@@ -111,29 +184,131 @@ function validatedAtlasText(ab, name){
   return text;
 }
 
-// 小人骨架（SPSprachen）用 flip 骨骼控制左右镜像。
-// 勾选 = scaleX -1（默认），不勾选 = 数据原样 scaleX 1。
+function readSkeleton(file, allowMissingEvents){
+  return file.arrayBuffer().then(function(ab){
+    return { name: file.name, text: skeletonText(ab, file.name, allowMissingEvents) };
+  });
+}
+
+function readPng(file){
+  return new Promise(function(resolve, reject){
+    var img = new Image(), url = URL.createObjectURL(file);
+    img.onload = function(){ URL.revokeObjectURL(url); resolve({ name: file.name, image: img }); };
+    img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('贴图无法读取：' + file.name)); };
+    img.src = url;
+  });
+}
+
+function supersedeCatalogLoad(){
+  if (!catalogLoad) return;
+  catalogLoad.abort();
+  catalogLoad = null;
+  Object.keys(loading).forEach(function(key){ loading[key] = false; });
+}
+
+function assetFile(asset, signal){
+  return fetch(asset.url, { signal: signal }).then(function(response){
+    if (!response.ok) throw new Error('无法读取 ' + asset.name + '（HTTP ' + response.status + '）');
+    return response.blob();
+  }).then(function(blob){ return new File([blob], asset.name, { type: blob.type }); });
+}
+
+async function loadCatalogEntry(entry){
+  supersedeCatalogLoad();
+  var request = new AbortController();
+  catalogLoad = request;
+  resetPreview();
+  skelList = [];
+  setRigVariants([], 0);
+  atlasText = null;
+  pngMap = {};
+  compositeMap = {};
+  Object.keys(loadVersion).forEach(function(key){
+    ++loadVersion[key];
+    loadErrors[key] = '';
+    loading[key] = true;
+  });
+  ['f_skel', 'f_atlas', 'f_png'].forEach(function(id){ document.getElementById(id).value = ''; });
+  document.getElementById('chk_flip').checked = entry.kind === 'petit';
+  document.getElementById('chk_all').checked = true;
+  playing = true;
+  msg('正在加载 ' + entry.title + '…');
+  var get = function(asset){ return assetFile(asset, request.signal); };
+  var skeletonsByUrl = new Map();
+  function getSkeleton(asset){
+    if (!skeletonsByUrl.has(asset.url))
+      skeletonsByUrl.set(asset.url, get(asset).then(function(file){ return readSkeleton(file, true); }));
+    return skeletonsByUrl.get(asset.url);
+  }
+  try {
+    var result = await Promise.all([
+      Promise.all(entry.skeletons.map(getSkeleton)),
+      entry.atlas ? get(entry.atlas).then(function(file){
+        return file.arrayBuffer().then(function(ab){ return validatedAtlasText(ab, file.name); });
+      }) : null,
+      Promise.all(entry.pngs.map(function(asset){ return get(asset).then(readPng); })),
+      Promise.all((entry.variants || []).map(async function(variant){
+        var loaded = await getSkeleton(variant.skeleton);
+        return { label: variant.label, url: variant.skeleton.url, skeleton: loaded };
+      }))
+    ]);
+    if (catalogLoad !== request) return;
+    skelList = result[0];
+    atlasText = result[1];
+    result[2].forEach(function(entry){ pngMap[entry.name] = entry.image; });
+    buildComposite();
+    var index = result[3].findIndex(function(variant){ return variant.url === entry.skeletons[0].url; });
+    setRigVariants(result[3], Math.max(0, index));
+    Object.keys(loading).forEach(function(key){ loading[key] = false; });
+    if (atlasText && rigVariants.length){
+      refreshRigCompatibility();
+    } else finishSkelLoad(skelList.length);
+    if (!atlasText && !document.getElementById('skin_swap').hidden){
+      document.getElementById('skin_swap').open = true;
+      msg('动作骨架已加载。请选择一组角色图集和贴图。');
+    }
+  } catch (err) {
+    if (catalogLoad !== request) return;
+    request.abort();
+    Object.keys(loading).forEach(function(key){ loading[key] = false; });
+    msg('加载失败：' + err.message);
+  } finally {
+    if (catalogLoad === request) catalogLoad = null;
+  }
+}
+
+// 小人的 flip 骨骼控制左右镜像，同时保留骨架定义的缩放。
 function applyPetitFlip(s){
   if (s.flipBone === undefined) s.flipBone = s.skeleton.findBone('flip') || null;
-  if (s.flipBone) s.flipBone.scaleX = document.getElementById('chk_flip').checked ? -1 : 1;
+  if (s.flipBone){
+    var direction = document.getElementById('chk_flip').checked ? -1 : 1;
+    s.flipBone.scaleX = direction * Math.abs(s.flipBone.data.scaleX);
+  }
 }
 
 document.getElementById('f_skel').addEventListener('change', function(e){
+  supersedeCatalogLoad();
   resetPreview();
   skelList = [];
+  setRigVariants([], 0);
   loadErrors.skel = '';
   var files = Array.prototype.slice.call(e.target.files);
   var version = ++loadVersion.skel;
   loading.skel = files.length > 0;
   if (!files.length) { fileStatus('未选择骨架'); return; }
-  Promise.all(files.map(function(f){
-    return f.arrayBuffer().then(function(ab){
-      return { name: f.name, text: skeletonText(ab, f.name) };
-    });
-  })).then(function(list){
+  Promise.all(files.map(function(file){ return readSkeleton(file); })).then(function(list){
     if (version !== loadVersion.skel) return;
     loading.skel = false;
     skelList = list;
+    var rigs = list.map(function(skeleton){ return { match: manualRigFamily(skeleton.name), skeleton: skeleton }; });
+    if (rigs.length === 2 && rigs.every(function(rig){ return rig.match; }) &&
+        rigs[0].match.family === rigs[1].match.family && rigs[0].match.label !== rigs[1].match.label){
+      skelList = [list[0]];
+      setRigVariants(rigs.map(function(rig){ return { label: rig.match.label, skeleton: rig.skeleton }; }), 0);
+      refreshRigCompatibility();
+      return;
+    }
+    setRigVariants([], 0);
     finishSkelLoad(list.length);
   }).catch(function(err){
     if (version !== loadVersion.skel) return;
@@ -169,9 +344,10 @@ function finishSkelLoad(n){
     }
   } catch(e){}
   fileStatus('已选骨架 ' + n + ' 个（已按图层排序）' + hint);
-  tryInit();
+  refreshRigCompatibility();
 }
 document.getElementById('f_atlas').addEventListener('change', function(e){
+  supersedeCatalogLoad();
   resetPreview();
   atlasText = null;
   loadErrors.atlas = '';
@@ -184,7 +360,7 @@ document.getElementById('f_atlas').addEventListener('change', function(e){
     atlasText = validatedAtlasText(ab, f.name);
     loading.atlas = false;
     fileStatus('已选图集：' + f.name);
-    tryInit();
+    refreshRigCompatibility();
   }).catch(function(err){
     if (version !== loadVersion.atlas) return;
     loading.atlas = false;
@@ -193,6 +369,7 @@ document.getElementById('f_atlas').addEventListener('change', function(e){
   });
 });
 document.getElementById('f_png').addEventListener('change', function(e){
+  supersedeCatalogLoad();
   resetPreview();
   pngMap = {};
   compositeMap = {};
@@ -201,20 +378,13 @@ document.getElementById('f_png').addEventListener('change', function(e){
   var files = Array.prototype.slice.call(e.target.files);
   loading.png = files.length > 0;
   if (!files.length) { fileStatus('未选择贴图'); return; }
-  Promise.all(files.map(function(f){
-    return new Promise(function(resolve, reject){
-      var img = new Image(), url = URL.createObjectURL(f);
-      img.onload = function(){ URL.revokeObjectURL(url); resolve({ name: f.name, image: img }); };
-      img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error('贴图无法读取：' + f.name)); };
-      img.src = url;
-    });
-  })).then(function(images){
+  Promise.all(files.map(readPng)).then(function(images){
     if (version !== loadVersion.png) return;
     loading.png = false;
     images.forEach(function(entry){ pngMap[entry.name] = entry.image; });
     buildComposite();
     fileStatus('已选贴图 ' + files.length + ' 个');
-    tryInit();
+    refreshRigCompatibility();
   }).catch(function(err){
     if (version !== loadVersion.png) return;
     loading.png = false;
@@ -224,13 +394,14 @@ document.getElementById('f_png').addEventListener('change', function(e){
 });
 
 // CGSS 是 RGB 主贴图 + 独立 A8 透明通道，两张合成为真正的 RGBA，去掉黑底黑边
-function buildComposite(){
-  Object.keys(pngMap).forEach(function(k){
+function buildComposite(images = pngMap){
+  var result = Object.create(null);
+  Object.keys(images).forEach(function(k){
     var m = /^(.*)_A8\.png$/i.exec(k);
     if (!m) return;
     var rgbName = m[1] + '.png';
-    if (!pngMap[rgbName]) return;
-    var rgb = pngMap[rgbName], a8 = pngMap[k];
+    if (!images[rgbName]) return;
+    var rgb = images[rgbName], a8 = images[k];
     var c = document.createElement('canvas');
     c.width = rgb.naturalWidth;
     c.height = rgb.naturalHeight;
@@ -238,12 +409,176 @@ function buildComposite(){
     cx.drawImage(rgb, 0, 0, c.width, c.height);
     cx.globalCompositeOperation = 'destination-in';  // 用 A8 的 alpha 保留 RGB
     cx.drawImage(a8, 0, 0, c.width, c.height);
-    compositeMap[rgbName] = c;
-    msg('已合成透明度：' + rgbName + ' + ' + k);
+    result[rgbName] = c;
+  });
+  if (images === pngMap) compositeMap = result;
+  return result;
+}
+
+function normalizeCarnivalAttachments(skeleton, atlas, name){
+  var animations = skeleton.animations;
+  var skin = skeleton.skins && skeleton.skins.default;
+  var carnival = animations && animations.action_10_3 && animations.action_10_4 && animations.idle_3 && animations.idle_4;
+  var sweets = /^(SPKCStaff|SPACSkelton)/i.test(name || '');
+  if ((!carnival && !sweets) || !skin || !skin.shadow || !skin.shadow.shadow) return;
+
+  // The unpadded shadow distinguishes 1× card atlases from 2× Carnival atlases.
+  var shadow = atlas.findRegion('shadow');
+  if (!shadow) return;
+  var pixelScale = Math.round(shadow.originalWidth / skin.shadow.shadow.width);
+  if ((pixelScale !== 1 && pixelScale !== 2) ||
+      Math.abs(shadow.originalWidth - skin.shadow.shadow.width * pixelScale) > 1 ||
+      Math.abs(shadow.originalHeight - skin.shadow.shadow.height * pixelScale) > 1) return;
+
+  Object.values(skin).forEach(function(slot){
+    Object.keys(slot).forEach(function(name){
+      var attachment = slot[name];
+      if ((attachment.type && attachment.type !== 'region') ||
+          !(attachment.width > 0 && attachment.height > 0)) return;
+      var region = atlas.findRegion(attachment.path || attachment.name || name);
+      if (!region || region.width <= 1 || region.height <= 1) return;
+
+      // Newer skins add symmetric padding in 100-unit steps to their logical canvas.
+      var paddingStep = 100 * pixelScale;
+      var extraWidth = region.originalWidth - attachment.width * pixelScale;
+      var extraHeight = region.originalHeight - attachment.height * pixelScale;
+      var padding = Math.round(extraWidth / (2 * paddingStep)) * paddingStep;
+      if (!padding || (padding < 0 && !sweets) || Math.abs(extraWidth - 2 * padding) > 1 ||
+          Math.abs(extraHeight - 2 * padding) > 1 ||
+          region.offsetX < padding || region.offsetY < padding ||
+          region.offsetX + region.width > region.originalWidth - padding ||
+          region.offsetY + region.height > region.originalHeight - padding) return;
+
+      // Spine uses width / originalWidth for the packed rectangle and anchors it about
+      // the canvas center. Matching the padded dimensions restores the correct ratio.
+      attachment.width = region.originalWidth / pixelScale;
+      attachment.height = region.originalHeight / pixelScale;
+    });
   });
 }
 
-function tryInit(){
+function makeAtlas(text, images, composites){
+  return new spine.TextureAtlas(text, function(path){
+    var key = path.split(/[\\\/]/).pop();
+    var image = composites[key] || images[key];
+    if (!image) throw new Error('图集引用的贴图「' + key + '」不在已选贴图里，请选择配套的 PNG。');
+    return new spine.canvas.CanvasTexture(image);
+  });
+}
+
+function rigData(source, atlas){
+  var skeleton = JSON.parse(source.text);
+  normalizeCarnivalAttachments(skeleton, atlas, source.name);
+  return new spine.SkeletonJson(new spine.AtlasAttachmentLoader(atlas)).readSkeletonData(skeleton);
+}
+
+function inspectRigs(atlas){
+  var choices = rigVariants.length ? rigVariants : [{ label: '当前骨架', skeleton: skelList[0] }];
+  return choices.map(function(choice){
+    try { return { label: choice.label, data: rigData(choice.skeleton, atlas) }; }
+    catch (err) { return { label: choice.label, error: err.message }; }
+  });
+}
+
+function showRigResults(results, using){
+  var selector = document.getElementById('rig_variant');
+  results.forEach(function(result, index){
+    if (selector.options[index]) selector.options[index].disabled = !!using && !result.data;
+  });
+  var summary = results.map(function(result){
+    return result.label + (result.data ? ' 可用' : ' 无法加载（' + result.error + '）');
+  }).join('\n');
+  document.getElementById('skin_status').textContent = summary +
+    (using && results.length > 1 ? '\n当前使用 ' + using : '');
+}
+
+function selectRig(index, data){
+  var previous = skelList[0] && skelList[0].sel ? skelList[0].sel.value : '';
+  if (rigVariants.length){
+    rigIndex = index;
+    document.getElementById('rig_variant').selectedIndex = index;
+    skelList = [{ ...rigVariants[index].skeleton }];
+  }
+  resetPreview();
+  tryInit(previous, [data]);
+}
+
+function refreshRigCompatibility(){
+  if (!rigVariants.length || !atlasText || !Object.keys(pngMap).length ||
+      Object.values(loading).some(Boolean) || Object.values(loadErrors).some(Boolean)){
+    tryInit();
+    return;
+  }
+  try {
+    var results = inspectRigs(makeAtlas(atlasText, pngMap, compositeMap));
+    var index = results[rigIndex].data ? rigIndex : results.findIndex(function(result){ return result.data; });
+    if (index >= 0) selectRig(index, results[index].data);
+    showRigResults(results, index >= 0 ? results[index].label : '');
+    if (index < 0){
+      document.getElementById('skin_swap').open = true;
+      msg('这组图集无法加载。请更换图集及对应贴图。');
+    }
+  } catch (err) { msg('加载失败：' + err.message); }
+}
+
+document.getElementById('skin_apply').addEventListener('click', async function(){
+  var atlasFile = document.getElementById('skin_atlas').files[0];
+  var textures = Array.from(document.getElementById('skin_png').files);
+  var status = document.getElementById('skin_status');
+  if (skelList.length !== 1 || !atlasFile || !textures.length){
+    status.textContent = '请先选动作，再选择配套的图集和 PNG 贴图。';
+    return;
+  }
+  var button = this;
+  var version = ++skinVersion;
+  button.disabled = true;
+  status.textContent = '正在检查图集和骨架…';
+  try {
+    var files = await Promise.all([atlasFile.arrayBuffer(), Promise.all(textures.map(readPng))]);
+    if (version !== skinVersion) return;
+    var text = validatedAtlasText(files[0], atlasFile.name);
+    var images = Object.create(null);
+    files[1].forEach(function(file){ images[file.name] = file.image; });
+    var composites = buildComposite(images);
+    var results = inspectRigs(makeAtlas(text, images, composites));
+    var index = results[rigIndex].data ? rigIndex : results.findIndex(function(result){ return result.data; });
+    if (index < 0){
+      status.textContent = results.map(function(result){ return result.label + ' 无法加载（' + result.error + '）'; }).join('\n');
+      return;
+    }
+    atlasText = text;
+    pngMap = images;
+    compositeMap = composites;
+    loadErrors.atlas = loadErrors.png = '';
+    selectRig(index, results[index].data);
+    showRigResults(results, results[index].label);
+  } catch (err) {
+    if (version === skinVersion) status.textContent = '更换角色失败：' + err.message;
+  } finally {
+    if (version === skinVersion) button.disabled = false;
+  }
+});
+
+document.getElementById('rig_variant').addEventListener('change', function(){
+  var index = this.selectedIndex;
+  if (!rigVariants[index]) return;
+  if (!atlasText){
+    rigIndex = index;
+    skelList = [{ ...rigVariants[index].skeleton }];
+    return;
+  }
+  try {
+    var results = inspectRigs(makeAtlas(atlasText, pngMap, compositeMap));
+    if (results[index].data) selectRig(index, results[index].data);
+    else this.selectedIndex = rigIndex;
+    showRigResults(results, results[rigIndex].label);
+  } catch (err) {
+    this.selectedIndex = rigIndex;
+    document.getElementById('skin_status').textContent = err.message;
+  }
+});
+
+function tryInit(preferredAnimation, preparedData){
   if (loading.skel || loading.atlas || loading.png || loadErrors.skel || loadErrors.atlas || loadErrors.png) return;
   if (!skelList.length || !atlasText || !Object.keys(pngMap).length) return;
   try {
@@ -251,21 +586,7 @@ function tryInit(){
     var ctx = canvas.getContext('2d');
     renderer = new spine.canvas.SkeletonRenderer(ctx);
     renderer.triangleRendering = true; // mesh 附件必须开三角形渲染
-    var loader = function(path){
-      var key = path.split(/[\\\/]/).pop();
-      if (compositeMap[key]) return new spine.canvas.CanvasTexture(compositeMap[key]);
-      var img = pngMap[key];
-      if (!img) {
-        // 图集引用的贴图没被选中：明确报错，而不是静默拿第一张贴图渲染成“随机扒块”
-        throw new Error('图集引用的贴图 "' + key + '" 不在已选贴图里，图集和贴图不配套。\n' +
-          '小人请选：骨架 SPSprachen_s.json + 图集 SPC{角色/卡id}.atlas(.asset) + 贴图 SPC{角色/卡id}.png\n' +
-          '卡面动画请选：5 个 SP3S{卡id}_*.skel + SP3S{卡id}_tex.atlas(.asset) + tex.png + tex_A8.png');
-      }
-      return new spine.canvas.CanvasTexture(img);
-    };
-    var atlas = new spine.TextureAtlas(atlasText, loader);
-    var att = new spine.AtlasAttachmentLoader(atlas);
-    var j = new spine.SkeletonJson(att);
+    var atlas = preparedData ? null : makeAtlas(atlasText, pngMap, compositeMap);
 
     canvas.width = 1400;
     canvas.height = 1400;
@@ -285,8 +606,8 @@ function tryInit(){
       glRenderer = new CGSSWebGLRenderer(glCanvas, { preserveDrawingBuffer: true });
     } catch (e2) { glRenderer = null; glCanvas = null; }
 
-    skelList.forEach(function(s){
-      var data = j.readSkeletonData(s.text);
+    skelList.forEach(function(s, index){
+      var data = preparedData ? preparedData[index] : rigData(s, atlas);
       s.skeleton = new spine.Skeleton(data);
       s.skeleton.flipY = true;   // Spine 坐标 y 向上，canvas 是 y 向下，官方示例即此修法
       s.state = new spine.AnimationState(new spine.AnimationStateData(data));
@@ -304,6 +625,12 @@ function tryInit(){
         o.textContent = a.name; o.value = a.name; sel.appendChild(o);
       });
       s.sel = sel;
+      if (preferredAnimation && s.data.animations.some(function(animation){ return animation.name === preferredAnimation; }))
+        sel.value = preferredAnimation;
+      else if (canSwapSkin(s.name)){
+        var playable = s.data.animations.find(function(animation){ return animation.duration > 0 && animation.name[0] !== '_'; });
+        if (playable) sel.value = playable.name;
+      }
       sel.addEventListener('change', function(){
         if (s.state && sel.value) s.state.setAnimation(0, sel.value, true);
       });
@@ -312,7 +639,7 @@ function tryInit(){
       s.check = chk;
       rows.appendChild(lab); rows.appendChild(sel); rows.appendChild(chk);
       rows.appendChild(document.createElement('br'));
-      if (s.data.animations.length) s.state.setAnimation(0, s.data.animations[0].name, true);
+      if (sel.value) s.state.setAnimation(0, sel.value, true);
     });
 
     // 有背景(卡面动画)：用各层静态 setup 包围盒适配，背景铺满画面（特效动画范围大，不能按它缩放）
@@ -322,7 +649,7 @@ function tryInit(){
     var offset = new spine.Vector2(), size = new spine.Vector2(), temp = [];
     var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     skelList.forEach(function(s){
-      var anim = s.data.animations.length ? s.data.animations[0] : null;
+      var anim = findAnim(s);
       if (hasBg){
         s.skeleton.setToSetupPose();
         s.skeleton.updateWorldTransform();
@@ -359,16 +686,16 @@ function tryInit(){
     msg('加载成功：' + skelList.length + ' 个骨架（自动适配画面）');
     previewReady = true;
     last = performance.now();
-    frameId = requestAnimationFrame(loop);
+    loop(last, true);
   } catch (err) {
     resetPreview();
     msg('加载失败：' + err.message + '\n' + (err.stack || ''));
   }
 }
 
-function loop(t){
+function loop(t, drawStill){
   frameId = requestAnimationFrame(loop);
-  if (!previewReady || !playing) return;
+  if (!previewReady || (!playing && !drawStill)) return;
   var dt = Math.min(0.05, (t - last) / 1000);
   last = t;
   var sp = parseFloat(document.getElementById('speed').value) || 1;
@@ -467,18 +794,20 @@ function exportMp4Name(){
   return m2 ? m2[1] : 'export';
 }
 
-function exportMP4(){
+async function exportMP4(){
   if (!previewReady){ msg('请先成功加载骨架、图集和贴图'); return; }
   if (!window.VideoEncoder || !window.VideoFrame){ msg('当前浏览器不支持 WebCodecs，无法导出 MP4（请用新版 Chrome/Edge）'); return; }
   if (typeof Mp4Muxer === 'undefined'){ msg('缺少 mp4-muxer.min.js'); return; }
+  var btn = document.getElementById('btn_export');
+  if (btn.disabled) return;
   var b = exportBounds();
+  var sourceSkeletons = skelList, sourceName = exportMp4Name();
   // H.264(yuv420) 要求宽高为偶数：先按背景尺寸四舍五入，再向上取偶（尽量贴近背景实际大小）
   var w = Math.round(b.maxX - b.minX), h = Math.round(b.maxY - b.minY);
   var maxDim = 4096;
   var sc = Math.min(1, maxDim / Math.max(w, h));
   w = Math.max(2, Math.floor(w * sc)); h = Math.max(2, Math.floor(h * sc));
   if (w % 2) w++; if (h % 2) h++;
-  var btn = document.getElementById('btn_export');
   var st = document.getElementById('export_status');
   btn.disabled = true;
   st.textContent = '准备中（' + w + 'x' + h + '，' + b.duration.toFixed(1) + 's @ ' + b.fps + 'fps）...';
@@ -487,7 +816,7 @@ function exportMP4(){
   canvas.width = w; canvas.height = h;
   var ctx = canvas.getContext('2d');
   // 优先 WebGL 导出（无接缝）；失败回退 canvas 2D 超采样
-  expGL = null; expGLCanvas = null;
+  var expGL = null, expGLCanvas = null;
   try {
     expGLCanvas = document.createElement('canvas');
     expGLCanvas.width = w; expGLCanvas.height = h;
@@ -507,27 +836,7 @@ function exportMP4(){
     fastStart: 'in-memory'
   });
   var bitrate = Math.min(100000000, Math.round(w * h * b.fps * 0.7));
-  var encoder = new VideoEncoder({
-    output: function(chunk, meta){ muxer.addVideoChunk(chunk, meta); },
-    error: function(e){ console.error(e); st.textContent = '编码错误：' + e.message; btn.disabled = false; }
-  });
-
-  (function configure(){
-    var tried = 0;
-    function next(){
-      tried++;
-      if (tried > 2){ st.textContent = '浏览器不支持 H.264 编码'; btn.disabled = false; return; }
-      var codec = tried === 1 ? 'avc1.4d002a' : 'avc1.42001f';
-      VideoEncoder.isConfigSupported({ codec: codec, width: w, height: h, bitrate: bitrate, framerate: b.fps, avc: { format: 'avc' } })
-        .then(function(info){
-          if (info.supported){
-            encoder.configure({ codec: codec, width: w, height: h, bitrate: bitrate, framerate: b.fps, avc: { format: 'avc' } });
-            start();
-          } else next();
-        }).catch(next);
-    }
-    next();
-  })();
+  var encoder, encodeError, muxedFrames = 0, hasDecoderConfig = false;
 
   var s = Math.min(w / (b.maxX - b.minX), h / (b.maxY - b.minY));
   var tx = -b.minX * s + (w - (b.maxX - b.minX) * s) / 2;
@@ -537,7 +846,7 @@ function exportMP4(){
     if (expGL) {
       expGL.setTransform(s, tx, ty);
       expGL.clear(0.2, 0.2, 0.2, 1);
-      skelList.forEach(function(sk){
+      sourceSkeletons.forEach(function(sk){
         if (sk.check && !sk.check.checked) return;
         var an = findAnim(sk);
         if (!an) return;
@@ -556,7 +865,7 @@ function exportMP4(){
     ectx.fillStyle = '#333';
     ectx.fillRect(0,0,expOff.width,expOff.height);
     ectx.setTransform(s*EF,0,0,s*EF,tx*EF,ty*EF);
-    skelList.forEach(function(sk){
+    sourceSkeletons.forEach(function(sk){
       if (sk.check && !sk.check.checked) return;
       var an = findAnim(sk);
       if (!an) return;
@@ -573,46 +882,80 @@ function exportMP4(){
   }
 
   var total = Math.ceil(b.duration * b.fps);
-  var i = 0;
-  function step(){
-    if (i >= total){ finish(); return; }
-    drawFrame(i / b.fps);
-    var vf = new VideoFrame(canvas, { timestamp: Math.round(i * 1e6 / b.fps) });
-    encoder.encode(vf, { keyFrame: i % (b.fps * 2) === 0 });
-    vf.close();
-    i++;
-    if (i % 12 === 0 || i === total){
-      st.textContent = '编码中 ' + i + '/' + total + ' 帧';
-      setTimeout(step, 0);
-    } else {
-      step();
-    }
-  }
-  function start(){ st.textContent = '导出中（' + w + 'x' + h + '）...'; setTimeout(step, 30); }
+  const timestamp = i => Math.round(i * 1e6 / b.fps);
+  const yieldToPage = () => new Promise(resolve => setTimeout(resolve, 0));
 
-  async function finish(){
-    try {
-      await encoder.flush();
-      muxer.finalize();
-      var blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
-      var name = 'CGSS_' + exportMp4Name() + '_' + w + 'x' + h + '_' + b.fps + 'fps.mp4';
-      var a = document.createElement('a');
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-      st.textContent = '已导出 ' + name;
-      msg('导出完成：' + name + '（' + w + 'x' + h + '，' + b.fps + 'fps，最高码率）');
-    } catch(e){
-      console.error(e);
-      st.textContent = '导出失败：' + e.message;
+  try {
+    var config;
+    for (const codec of ['avc1.4d002a', 'avc1.42001f']) {
+      const candidate = { codec, width: w, height: h, bitrate, framerate: b.fps, avc: { format: 'avc' } };
+      const support = await VideoEncoder.isConfigSupported(candidate);
+      if (support.supported) { config = candidate; break; }
     }
+    if (!config) throw new Error('浏览器不支持当前尺寸的 H.264 编码');
+    encoder = new VideoEncoder({
+      output(chunk, meta){
+        if (encodeError) return;
+        try {
+          if (chunk.duration > 0) muxer.addVideoChunk(chunk, meta);
+          else {
+            // Some encoders omit duration even when the input frame provides it.
+            const frame = Math.round(chunk.timestamp * b.fps / 1e6);
+            const bytes = new Uint8Array(chunk.byteLength);
+            chunk.copyTo(bytes);
+            muxer.addVideoChunkRaw(bytes, chunk.type, chunk.timestamp, timestamp(frame + 1) - timestamp(frame), meta);
+          }
+          hasDecoderConfig ||= !!meta?.decoderConfig?.description?.byteLength;
+          muxedFrames++;
+        } catch (error) { encodeError = error; }
+      },
+      error(error){ encodeError = error; }
+    });
+    encoder.configure(config);
+
+    for (let i = 0; i < total; i++){
+      while (!encodeError && encoder.encodeQueueSize >= 8) await yieldToPage();
+      if (encodeError) throw encodeError;
+      drawFrame(i / b.fps);
+      const time = timestamp(i);
+      const frame = new VideoFrame(canvas, { timestamp: time, duration: timestamp(i + 1) - time });
+      try { encoder.encode(frame, { keyFrame: i % (b.fps * 2) === 0 }); }
+      finally { frame.close(); }
+      if ((i + 1) % 12 === 0 || i + 1 === total){
+        st.textContent = '编码中 ' + (i + 1) + '/' + total + ' 帧';
+        await yieldToPage();
+      }
+    }
+    await encoder.flush();
+    if (encodeError) throw encodeError;
+    if (muxedFrames !== total) throw new Error('视频帧不完整（' + muxedFrames + '/' + total + '）');
+    if (!hasDecoderConfig) throw new Error('编码器没有提供 H.264 解码配置');
+    muxer.finalize();
+    var blob = new Blob([muxer.target.buffer], { type: 'video/mp4' });
+    var name = 'CGSS_' + sourceName + '_' + w + 'x' + h + '_' + b.fps + 'fps.mp4';
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ URL.revokeObjectURL(a.href); a.remove(); }, 2000);
+    st.textContent = '已导出 ' + name;
+    if (sourceSkeletons === skelList)
+      msg('导出完成：' + name + '（' + w + 'x' + h + '，' + b.fps + 'fps，最高码率）');
+  } catch(e){
+    console.error(e);
+    st.textContent = '导出失败：' + e.message;
+  } finally {
+    if (encoder && encoder.state !== 'closed') encoder.close();
+    if (expGL) expGL.gl.getExtension('WEBGL_lose_context')?.loseContext();
     btn.disabled = false;
   }
 }
 
 document.getElementById('btn_export').onclick = exportMP4;
 </script>
+<script src="library.js"></script>
+<script src="gifenc.js"></script>
+<script src="gif-export.js"></script>
 </body>
 </html>

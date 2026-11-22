@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include <wchar.h>
 #include <windows.h>
 #include "util.h"
 
@@ -25,18 +26,44 @@ void get_dl_root(wchar_t *buf, int n){
 /* 递归创建目录 */
 
 void mkdirs(const wchar_t *path){
-    wchar_t tmp[1024];
+    wchar_t tmp[1300];
+    if (wcslen(path) >= _countof(tmp)) return;
     wcscpy(tmp, path);
     for (wchar_t *p = tmp + 3; *p; p++){
         if (*p == L'\\'){
             *p = 0;
             if (!CreateDirectoryW(tmp, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
-                printf("????? %ls err=%lu\n", tmp, (unsigned long)GetLastError());
+                printf("创建目录失败：%ls（Windows 错误 %lu）\n", tmp, (unsigned long)GetLastError());
             *p = L'\\';
         }
     }
     if (!CreateDirectoryW(tmp, NULL) && GetLastError() != ERROR_ALREADY_EXISTS)
-        printf("????? %ls err=%lu\n", tmp, (unsigned long)GetLastError());
+        printf("创建目录失败：%ls（Windows 错误 %lu）\n", tmp, (unsigned long)GetLastError());
+}
+
+int make_named_download_dir(int id, const char *title, wchar_t *out, int capacity){
+    wchar_t root[1024], name[512] = L"", cleaned[201];
+    get_dl_root(root, _countof(root));
+    MultiByteToWideChar(CP_UTF8, 0, title, -1, name, _countof(name));
+    size_t used = 0;
+    for (size_t i = 0; name[i] && used < _countof(cleaned) - 1; i++){
+        wchar_t ch = name[i];
+        if (ch == L'\\' && (name[i+1] == L'n' || name[i+1] == L'r' || name[i+1] == L't')){
+            i++;
+            ch = L' ';
+        }
+        if (ch < 32) ch = L' ';
+        if (wcschr(L"<>:\"/\\|?*", ch)) ch = L'_';
+        if (ch == L' ' && (used == 0 || cleaned[used-1] == L' ')) continue;
+        cleaned[used++] = ch;
+    }
+    if (used && cleaned[used-1] >= 0xd800 && cleaned[used-1] <= 0xdbff) used--;
+    while (used && (cleaned[used-1] == L' ' || cleaned[used-1] == L'.')) used--;
+    cleaned[used] = L'\0';
+    if (swprintf(out, capacity, L"%ls\\%d%ls", root, id, cleaned) < 0) return -1;
+    mkdirs(out);
+    DWORD attrs = GetFileAttributesW(out);
+    return attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) ? 0 : -1;
 }
 
 /* 资源名去掉目录部分（l/song_1.acb -> song_1.acb） */
