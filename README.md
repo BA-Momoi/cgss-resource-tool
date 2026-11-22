@@ -53,8 +53,7 @@ C 编写（MinGW + CMake），静态链接，Windows 10/11 上解压即用，不
 - 混合模式按 Spine 规则模拟（normal / additive / multiply / screen）
 - 默认 WebGL 渲染，无三角形接缝；不可用时自动回退 canvas 2D + 2 倍超采样
 - 支持左右镜像（flip），新卡 s / 老卡 n 骨架加载前自动提示
-- 页面提供「导出 MP4」按钮：WebCodecs 硬编码 H.264，30fps，
-  以背景包围盒为输出尺寸（需新版 Chrome / Edge）
+- 页面提供「导出 MP4」按钮：WebCodecs 硬编码 H.264，30fps，GIF
 
 ### 3. USM/CG 手动解包
 
