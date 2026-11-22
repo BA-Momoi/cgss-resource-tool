@@ -226,7 +226,7 @@ cmake -S . -B build -DCGSS_STATIC=OFF
 - 一部分小改动
 #### 动作互套,GIF导出示例(SPACSkeltonN_pause_000_00_4)
 ![卯月](GIF/CGSS_SPACSkeltonN_pause_000_00_4_324x480.gif)
-1[凪](GIF/CGSS_SPACSkeltonN_pause_000_00_4_330x480.gif)
+![凪](GIF/CGSS_SPACSkeltonN_pause_000_00_4_330x480.gif)
 
 ### v1.7(2026-10-7)
 - 新增传参(试验版)
